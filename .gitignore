@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local virtual environments
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+coverage/
+
+# Local data and logs
+stock_replay/data/raw/
+stock_replay/data/processed/
+stock_replay/data/app.db
+stock_replay/logs/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
