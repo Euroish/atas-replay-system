@@ -608,7 +608,8 @@ P4.0 的最小落盘 artifact 是 `visible_orderbook_checkpoints.parquet`：
 - 当前状态：P4.0 已完成并验证，17 个样本共 `1538160` checkpoint rows，盘中两个目标窗口 `quote_anchor_match_rate = 100%`。
 - P4.0 的 100% 是 quote anchor 构造性对齐，只代表 VisibleBook quote 点显示状态可复现，不代表 RawBook 已 100% 重建盘口。
 - 当前下一步是 P4.1 checkpoint seek/readback：输入 symbol/date/ts_ms，读取不晚于目标时间的最近 VisibleBook checkpoint，重复 seek 同一时间必须返回一致结果，且不得从开盘全量重放。
-- P4.1 最小后端读取层已完成：`VisibleCheckpointStore.load_checkpoint(symbol, trade_date, ts_ms)` 可读取不晚于目标时间的最近 `visible_orderbook_checkpoints.parquet` checkpoint，返回 ask/bid top10、source、raw residual 和 correction 成本；完整 replay engine、virtual clock、WebSocket 仍未完成。
+- P4.1 最小后端读取层已完成：`VisibleCheckpointStore.load_checkpoint(symbol, trade_date, ts_ms)` 可读取不晚于目标时间的最近 `visible_orderbook_checkpoints.parquet` checkpoint，返回 ask/bid top10、source、raw residual 和 correction 成本。
+- P4.2 后端回放核心已完成：`ReplayEngine` 以 `workspace_id/window_id` 为边界，基于缓存的 `VisibleCheckpointSession` 提供 `load`、`play`、`pause`、`seek`、`set_speed`、`tick`、`snapshot` 和 frame 组装；WebSocket 流式推送与前端接入仍待实现。
 
 ### 9.1 虚拟时钟
 
@@ -1340,6 +1341,8 @@ validation_runs:
 - 已完成 P4.0：新增 VisibleBook 层，quote 到来时锚定为可见盘口状态。
 - 已完成 P4.0：输出 visible/checkpoint 数据和 RawBook residual/correction 成本。
 - 已完成 P4.1 最小后端读取层：实现 checkpoint seek/readback。
+- 已完成 P4.2 后端回放核心：实现窗口级 `ReplayEngine`、虚拟时钟、倍速、seek、snapshot 和 frame 组装。
+- 待完成：FastAPI/WebSocket 流式推送、前端回放接入、quote-between 动画。
 - 实现虚拟时钟、播放、暂停、倍速、seek。
 - 实现 checkpoint。
 - 实现 WebSocket frame 推送。

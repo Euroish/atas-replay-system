@@ -250,3 +250,10 @@
   - aggregate `inter_quote_drift_abs_qty`
 - Verified deterministic repeat seek on both test data and real `600726.SH` checkpoint data.
 - This completes the minimum P4.1 backend checkpoint readback loop, but not the full replay service. Replay load/frame APIs, virtual clock, WebSocket streaming, and quote-between animation remain pending.
+
+## P4.2 Replay Core Findings
+- `VisibleCheckpointSession` provides an in-memory, per-session checkpoint cache so replay can seek without re-reading from the start of the day.
+- `ReplayEngine` keeps window state isolated by `(workspace_id, window_id)` and treats play/pause/seek/speed/tick as per-window operations.
+- `tick()` advances a virtual clock and snaps the visible frame to the latest checkpoint at or before the virtual time, which keeps frame output deterministic.
+- The returned replay frame now carries both the snapped checkpoint metadata and the ask/bid top10 payload needed by a later HTTP/WebSocket layer.
+- Verified behavior on both synthetic tests and real `600726.SH` data; the remaining gap is transport/UI, not replay state assembly.

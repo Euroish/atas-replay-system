@@ -1,39 +1,36 @@
 # Task Plan
 
 ## Goal
-Advance P4.1 by implementing deterministic VisibleBook checkpoint seek/readback without replaying from open.
+Advance P4.2 by implementing a window-scoped replay core on top of `VisibleCheckpointStore`.
 
 ## Scope
-- Add a backend checkpoint store that reads persisted `visible_orderbook_checkpoints.parquet`.
-- Given `symbol`, `trade_date`, and `ts_ms`, return the latest checkpoint at or before `ts_ms`.
-- Return deterministic ask/bid top10 plus source, raw residual, and correction metadata.
-- Do not implement replay virtual clock, WebSocket frame push, quote-between animation, or UI.
+- Cache `visible_orderbook_checkpoints.parquet` in memory per session.
+- Provide per-window `load`, `play`, `pause`, `seek`, `set_speed`, `tick`, and `snapshot`.
+- Return deterministic frame payloads with ask/bid top10 and checkpoint metadata.
+- Do not add FastAPI/WebSocket transport or UI integration in this step.
 
 ## Completed
-- Added `stock_replay/backend/stock_replay_backend/checkpoint_store.py`.
-- Added `VisibleCheckpointStore.load_checkpoint(symbol, trade_date, ts_ms, depth=10)`.
-- Added tests for latest-at-or-before lookup, deterministic repeat seek, depth limiting, and pre-first-checkpoint rejection.
-- Verified a real `600726.SH` checkpoint seek at `34260000`.
+- Added `stock_replay/backend/stock_replay_backend/replay_engine.py`.
+- Extended `stock_replay/backend/stock_replay_backend/checkpoint_store.py` with `VisibleCheckpointSession` and `load_session(...)`.
+- Added tests for replay load/play/pause/seek/tick and window isolation.
 - Updated `atas开发/project.md`, `findings.md`, `progress.md`, and this task plan.
 
 ## Verified Results
-- Backend tests: `14 passed`.
-- Real sample seek:
+- Backend tests: `16 passed`.
+- Real sample replay:
   - symbol/date: `600726.SH` / `20260424`
   - target `ts_ms = 34260000`
   - returned checkpoint `ts_ms = 34260000`
   - returned `quote_seq = 224`
   - ask levels: `10`
   - bid levels: `10`
-  - repeated seek result: deterministic
-- Latest state: P4.1 minimum backend checkpoint readback is complete; replay engine work remains.
+  - after `play` + `tick(1000)` at speed `1.0`, virtual clock advanced to `34261000` while the snapped checkpoint stayed deterministic
 
 ## Out Of Scope For This Step
-- Replay virtual clock.
-- Seek from persisted checkpoint.
-- WebSocket frame push.
-- Quote-between event-derived VisibleBook animation.
-- UI, Heatmap, DOM, or Footprint rendering changes.
+- FastAPI request/response routes.
+- WebSocket streaming loop.
+- Browser UI integration.
+- Quote-between animation and DOM/Heatmap rendering.
 
 ## Next Phase 4 Step
-Build the replay-facing frame/load layer on top of `VisibleCheckpointStore`, then add virtual clock and WebSocket streaming.
+Wire the replay core into an API/streaming layer so per-window load/play/pause/seek/speed can be driven over HTTP/WebSocket.

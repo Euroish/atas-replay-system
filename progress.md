@@ -231,3 +231,34 @@
   - WebSocket streaming
   - quote-between event-derived animation
   - UI/Heatmap/DOM changes
+
+## 2026-05-01 P4.2 Replay Core
+- Added backend module:
+  - `stock_replay/backend/stock_replay_backend/replay_engine.py`
+- Extended checkpoint storage with:
+  - `VisibleCheckpointSession`
+  - `VisibleCheckpointStore.load_session(symbol, trade_date)`
+- Implemented window-scoped replay controls:
+  - `load_window`
+  - `play`
+  - `pause`
+  - `seek`
+  - `set_speed`
+  - `tick`
+  - `snapshot`
+- Replay state is isolated by `(workspace_id, window_id)` and uses cached `VisibleCheckpointSession` data instead of replaying from open.
+- Added tests for:
+  - checkpoint-backed frame load
+  - speed-controlled virtual clock advancement
+  - window isolation
+- Ran `..\\.venv\\Scripts\\python.exe -m pytest` from `stock_replay/backend`; result: `16 passed`.
+- Verified a real `600726.SH` replay sample:
+  - `ts_ms = 34260000`
+  - `quote_seq = 224`
+  - `load_window` returned 10 ask levels and 10 bid levels
+  - `play` + `tick(1000)` advanced the virtual clock to `34261000`
+- Updated `atas开发/project.md` to record P4.2 replay core completion.
+- Remaining P4 work:
+  - FastAPI/WebSocket transport
+  - frontend replay wiring
+  - quote-between animation
