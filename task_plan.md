@@ -16,6 +16,8 @@ Complete `Phase 3.5：订单簿对账收口` for the uploaded multi-symbol sampl
 4. Update tests to cover passive-side trade depletion and the new sample location - complete
 5. Run backend tests and multi-symbol import validation - complete
 6. Record objective findings and remaining uncertainty - complete
+7. Add Phase 3.6 residual diagnostics from persisted validation/missing-order reports - complete
+8. Add first-open-quote checkpoint reproduction for precise opening alignment - complete
 
 ## Success Criteria
 - Trade depletion removes only order-book-relevant passive-side liquidity when the active-side order id is not represented as a resting order.
@@ -23,3 +25,5 @@ Complete `Phase 3.5：订单簿对账收口` for the uploaded multi-symbol sampl
 - Validation reports are still generated and remain locatable by `ts_ms`, `side`, and `level`.
 - Tests cover the corrected trade depletion semantics.
 - `findings.md` and `progress.md` record verified metrics objectively.
+- Residual diagnostics can be regenerated without modifying order-book reconstruction semantics.
+- Opening boundary alignment is explicitly reproducible for every sample symbol.

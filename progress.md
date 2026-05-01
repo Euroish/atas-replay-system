@@ -73,3 +73,32 @@
 ## Remaining Notes
 - The raw reconstructed book is substantially improved but not mathematically identical to all quote snapshots.
 - Remaining mismatch concentration suggests auction/open transition timing and high-activity timestamp semantics need a separate raw-vs-visible-book design decision before Phase 4.
+
+## 2026-05-01 Phase 3.6
+- Added backend module:
+  - `stock_replay/backend/stock_replay_backend/residual_diagnostics.py`
+- Added test:
+  - `stock_replay/backend/tests/test_residual_diagnostics.py`
+- Implemented residual diagnostics from persisted `validation_report.parquet`, `missing_order_report.parquet`, and adjacent `quotes.parquet`.
+- Generated ignored local diagnostics under `stock_replay/data/processed`:
+  - `residual_diagnostics.json`
+  - `residual_mismatch_groups.parquet`
+  - `residual_missing_groups.parquet`
+  - `residual_top_time_buckets.parquet`
+  - `opening_alignment_report.parquet`
+- Verified totals in `residual_diagnostics.json`:
+  - `mismatch_count = 188276`
+  - `price_mismatch_count = 136232`
+  - `qty_mismatch_count = 183738`
+  - `missing_order_count = 87841`
+- Verified requested time-window shares:
+  - `09:15-09:30`: `18887` mismatches, `10.03%`
+  - `09:30-09:31`: `1499` mismatches, `0.80%`
+  - `14:57-15:00`: `7523` mismatches, `4.00%`
+- Top mismatch buckets are minute-level buckets with full 20 mismatches per quote in the selected worst quote; the first deterministic buckets are `600726.SH` auction minutes `09:16`, `09:17`, `09:19`, `09:21`, and `09:22`.
+- Added opening checkpoint reproduction:
+  - first quote in `09:30-09:31` is selected per symbol as the open boundary snapshot
+  - all 11 symbols have `reproduced_mismatch_count = 0` in `opening_alignment_report.parquet`
+  - raw open-boundary mismatch remains recorded separately as diagnostic context
+- Ran `..\.venv\Scripts\python.exe -m pytest` from `stock_replay/backend`; result: `10 passed`.
+- No continuous quote-overwrite anchoring, replay clock, UI, or Phase 4 work was added.
