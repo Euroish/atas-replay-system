@@ -19,7 +19,7 @@ def test_import_sample_session() -> None:
     assert summary.symbol == "600726.SH"
     assert summary.trade_date == 20260424
     assert summary.session_id == "600726.SH-20260424"
-    assert len(summary.artifacts) == 6
+    assert len(summary.artifacts) == 7
 
     processed_dir = Path(summary.processed_dir)
     quotes = pl.read_parquet(processed_dir / "quotes.parquet")
@@ -28,6 +28,7 @@ def test_import_sample_session() -> None:
     events = pl.read_parquet(processed_dir / "events.parquet")
     validation_report = pl.read_parquet(processed_dir / "validation_report.parquet")
     missing_order_report = pl.read_parquet(processed_dir / "missing_order_report.parquet")
+    visible_checkpoints = pl.read_parquet(processed_dir / "visible_orderbook_checkpoints.parquet")
 
     assert quotes.height == 5005
     assert orders.height == 291702
@@ -35,6 +36,7 @@ def test_import_sample_session() -> None:
     assert events.height == 519237
     assert validation_report.height >= 0
     assert missing_order_report.height >= 0
+    assert visible_checkpoints.height == quotes.height * 20
 
     assert {"symbol", "trade_date", "time_raw", "ts_ms", "price_scale"}.issubset(quotes.columns)
     assert {"symbol", "trade_date", "time_raw", "ts_ms", "exchange_order_id"}.issubset(orders.columns)
@@ -44,8 +46,19 @@ def test_import_sample_session() -> None:
     assert {"reason", "event_id", "event_type", "ts_ms", "session", "source_seq"}.issubset(
         missing_order_report.columns
     )
+    assert {
+        "checkpoint_id",
+        "source",
+        "visible_price_int",
+        "raw_price_int",
+        "inter_quote_drift_abs_qty",
+        "correction_cost",
+    }.issubset(visible_checkpoints.columns)
     assert summary.validation_summary is not None
+    assert summary.visible_book_summary is not None
+    assert summary.visible_book_summary.quote_anchor_match_rate == 1.0
 
     report = json.loads((processed_dir / "import_report.json").read_text(encoding="utf-8"))
     assert report["warnings"]
     assert report["validation_summary"]["checked_quotes"] == 5005
+    assert report["visible_book_summary"]["quote_anchor_match_rate"] == 1.0

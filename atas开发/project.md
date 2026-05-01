@@ -302,6 +302,7 @@ atas回放系统/
    │  │     ├─ trades.parquet
    │  │     ├─ events.parquet
    │  │     ├─ orderbook_checkpoints.parquet
+   │  │     ├─ visible_orderbook_checkpoints.parquet
    │  │     ├─ heatmap_segments.parquet
    │  │     ├─ footprint_1s.parquet
    │  │     ├─ validation_report.parquet
@@ -596,6 +597,14 @@ VisibleBookState:
 - VisibleBook 在 quote 事件处锚定到 quote top10，并记录 RawBook 与 quote 的残差。
 - quote 间可用逐笔事件推动 VisibleBook 形成动画层，但到下一个 quote 必须重新锚定并记录 drift/correction。
 - 任何 frame、checkpoint、DOM 或 Heatmap 数据必须标明来源是 raw、quote_anchor、event_delta 或 correction。
+
+P4.0 的最小落盘 artifact 是 `visible_orderbook_checkpoints.parquet`：
+
+- 每个 quote checkpoint 输出 ask/bid top10 共 20 行。
+- `visible_price_int` / `visible_qty` 来自 quote anchor，用于可见盘口回放。
+- `raw_price_int` / `raw_qty` 保留同一时刻 RawBook top10 诊断值。
+- `quote_anchor_match`、`inter_quote_drift_abs_qty`、`correction_cost` 必须可统计。
+- `source` 当前为 `quote_anchor`；后续 quote 间推进再扩展 `event_delta`、`correction`。
 
 ### 9.1 虚拟时钟
 
@@ -1039,6 +1048,7 @@ backend/
 ├─ normalizer.py
 ├─ event_builder.py
 ├─ orderbook_engine.py
+├─ visible_book.py
 ├─ checkpoint_store.py
 ├─ validator.py
 ├─ replay_engine.py
@@ -1067,6 +1077,7 @@ backend/
 | `normalizer.py` | 字段映射、类型转换、price/time 标准化 |
 | `event_builder.py` | 合并 quote/order/trade/session 为稳定事件流 |
 | `orderbook_engine.py` | 逐笔维护订单簿 |
+| `visible_book.py` | 生成 quote-anchor 可见盘口 checkpoint，并记录 raw residual、inter-quote drift、correction cost |
 | `validator.py` | 用 quote top10 校验订单簿 |
 | `checkpoint_store.py` | checkpoint 写入、读取、压缩 |
 | `replay_engine.py` | 按窗口隔离的虚拟时钟、倍速、seek、WebSocket 推送 |

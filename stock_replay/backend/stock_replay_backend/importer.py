@@ -10,6 +10,7 @@ from .config import AppPaths
 from .event_builder import EventBuilder
 from .normalizer import load_csv_table, normalize_orders, normalize_quotes, normalize_trades
 from .validator import ValidationSummary, OrderBookValidator
+from .visible_book import VisibleBookBuilder, VisibleBookSummary
 
 
 CSV_FILE_NAMES = {
@@ -39,6 +40,7 @@ class ImportSummary:
     artifacts: list[ImportArtifact]
     warnings: list[str]
     validation_summary: ValidationSummary | None = None
+    visible_book_summary: VisibleBookSummary | None = None
 
 
 class SessionImporter:
@@ -67,6 +69,10 @@ class SessionImporter:
             normalized_frames["trades"],
         )
         validation_result = OrderBookValidator().validate(
+            event_result.events,
+            normalized_frames["quotes"],
+        )
+        visible_book_result = VisibleBookBuilder().build(
             event_result.events,
             normalized_frames["quotes"],
         )
@@ -131,6 +137,18 @@ class SessionImporter:
                 null_bytes_removed=0,
             )
         )
+        visible_checkpoint_path = processed_dir / "visible_orderbook_checkpoints.parquet"
+        visible_book_result.checkpoints.write_parquet(visible_checkpoint_path, compression="zstd")
+        artifacts.append(
+            ImportArtifact(
+                name="visible_orderbook_checkpoints",
+                source_file="generated",
+                parquet_file=str(visible_checkpoint_path),
+                encoding="derived",
+                source_rows=visible_book_result.checkpoints.height,
+                null_bytes_removed=0,
+            )
+        )
 
         summary = ImportSummary(
             session_id=f"{symbol}-{trade_date}",
@@ -141,6 +159,7 @@ class SessionImporter:
             artifacts=artifacts,
             warnings=warnings,
             validation_summary=validation_result.summary,
+            visible_book_summary=visible_book_result.summary,
         )
         report_path = processed_dir / "import_report.json"
         report_path.write_text(

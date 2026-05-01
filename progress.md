@@ -148,3 +148,41 @@
   - `reproduced_opening_mismatch_total = 0`
 - Ran `..\.venv\Scripts\python.exe -m pytest` from `stock_replay/backend`; result: `10 passed`.
 - Phase 3 is now closed. Phase 4 starts with VisibleBook quote-anchor checkpointing.
+
+## 2026-05-01 Phase 4.0 VisibleBook Quote Anchor
+- Re-read `atas开发/project.md`; scoped P4 work to the first backend VisibleBook quote-anchor checkpoint loop.
+- Added backend module:
+  - `stock_replay/backend/stock_replay_backend/visible_book.py`
+- Updated importer to generate:
+  - `visible_orderbook_checkpoints.parquet`
+  - `visible_book_summary` in `import_report.json`
+- Added test:
+  - `stock_replay/backend/tests/test_visible_book.py`
+- Updated importer test coverage for the new checkpoint artifact and summary.
+- Checkpoint rows preserve RawBook diagnostics:
+  - `raw_price_int`
+  - `raw_qty`
+  - `raw_price_match`
+  - `raw_qty_match`
+- Checkpoint rows expose P4 metric fields:
+  - `quote_anchor_match`
+  - `inter_quote_drift_abs_qty`
+  - `correction_cost`
+  - `source = quote_anchor`
+- Re-ran backend tests from `stock_replay/backend`; result: `11 passed`.
+- Re-imported all 17 sessions from `实例材料/个股数据`.
+- Generated ignored local summary:
+  - `stock_replay/data/processed/phase4_visible_import_summaries.json`
+- Verified 17-session P4.0 quote-anchor checkpoint metrics:
+  - `checkpoint_rows = 1538160`
+  - `quote_anchor_match_rate = 100%`
+  - `09:31-11:30 quote_anchor_match_rate = 100%`
+  - `13:00-14:57 quote_anchor_match_rate = 100%`
+  - aggregate `correction_cost = 12866109226`
+- Updated `atas开发/project.md` with the `visible_orderbook_checkpoints.parquet` artifact and `visible_book.py` module responsibility.
+- Not implemented in this step:
+  - replay virtual clock
+  - seek from checkpoint
+  - WebSocket frames
+  - quote-between event-derived VisibleBook animation
+  - UI/Heatmap/DOM changes

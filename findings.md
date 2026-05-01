@@ -194,3 +194,29 @@
   - Phase 3 is complete.
   - The high-activity samples strengthen, not weaken, the P3 conclusion that RawBook is a residual diagnostic layer.
   - P4 should target 95%+盘中 visible replay via VisibleBook quote-anchor checkpointing, while preserving RawBook as pure reconstruction.
+
+## Phase 4.0 VisibleBook Quote Anchor Findings
+- Implemented the first P4 backend checkpoint artifact:
+  - `visible_orderbook_checkpoints.parquet`
+- The artifact is generated during import next to `quotes.parquet`, `events.parquet`, `validation_report.parquet`, and `missing_order_report.parquet`.
+- Each quote emits 20 checkpoint rows:
+  - ask levels 1-10
+  - bid levels 1-10
+- VisibleBook state at P4.0 is quote-anchored:
+  - `visible_price_int` and `visible_qty` come from the quote top10.
+  - `source` is `quote_anchor`.
+  - `quote_anchor_match` is true by construction for generated checkpoint rows.
+- RawBook remains diagnostic and is not overwritten:
+  - `raw_price_int` and `raw_qty` capture the current `OrderBookEngine` top10 before quote anchoring.
+  - `raw_price_match` and `raw_qty_match` preserve the raw-vs-quote residual at the same level.
+- P4 metric fields now exist at checkpoint level:
+  - `inter_quote_drift_abs_qty`
+  - `correction_cost`
+  - `correction_abs_qty` retained as a compatibility alias for the current quantity-cost calculation.
+- Verified across the 17-session sample set:
+  - `checkpoint_rows = 1538160`
+  - aggregate `quote_anchor_match_rate = 100%`
+  - `09:31-11:30 quote_anchor_match_rate = 100%`
+  - `13:00-14:57 quote_anchor_match_rate = 100%`
+  - aggregate `correction_cost = 12866109226`
+- This satisfies the P4.0 quote-anchor checkpoint target, but it does not yet satisfy the full Phase 4 replay service target because seek, virtual clock, WebSocket frames, and inter-quote animation are not implemented.

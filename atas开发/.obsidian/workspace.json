@@ -27,32 +27,16 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "订单流分析系统设计.md",
+                "file": "开发过程问题/盘中匹配率优化分析.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "订单流分析系统设计"
+              "title": "盘中匹配率优化分析"
             }
           }
         ],
         "currentTab": 1
-      },
-      {
-        "id": "55bdbff1b225cb20",
-        "type": "tabs",
-        "children": [
-          {
-            "id": "b28c88af89c1f5d6",
-            "type": "leaf",
-            "state": {
-              "type": "graph",
-              "state": {},
-              "icon": "lucide-git-fork",
-              "title": "关系图谱"
-            }
-          }
-        ]
       }
     ],
     "direction": "vertical"
@@ -214,12 +198,14 @@
       "bases:新建数据库": false
     }
   },
-  "active": "ad1784d4f63b9865",
+  "active": "ca9de31a28a94975",
   "lastOpenFiles": [
+    "开发过程问题/Codex指导意见.md",
+    "订单流分析系统设计.md",
+    "开发过程问题/盘中匹配率优化分析.md",
+    "开发过程问题",
     "project.md",
     "READ.ME.md",
-    "订单流分析系统设计.md",
-    "未命名",
     "大致开发框架设计.md"
   ]
 }
