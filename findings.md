@@ -55,3 +55,43 @@
 - No checkpointing or replay clock yet.
 - No reconciliation strategy yet for reducing `missing_order_count` and quote mismatches.
 - No UI or CLI presentation layer yet beyond import summary JSON and the Parquet report itself.
+
+## Phase 3.5 Multi-Symbol Order-Book Findings
+- Uploaded sample root used for this task: `实例材料/个股数据`.
+- The sample set contains 11 importable symbol directories:
+  - `000711.SZ`, `002820.SZ`, `002857.SZ`, `300408.SZ`, `301305.SZ`
+  - `600726.SH`, `601609.SH`, `605389.SH`, `688008.SH`, `688758.SH`, `688819.SH`
+- Multi-symbol diagnostics verified that passive-side trade references were fully present in the order table:
+  - passive refs checked: `499455`
+  - passive refs missing from `orders.exchange_order_id`: `0`
+  - active refs checked: `499455`
+  - active refs missing from `orders.exchange_order_id`: `320376`
+- Implemented trade depletion rule:
+  - `aggressor_side = B`: ask-side order is required/passive and is depleted; bid-side order is depleted only if currently present.
+  - `aggressor_side = S`: bid-side order is required/passive and is depleted; ask-side order is depleted only if currently present.
+  - Missing active-side ids are not counted as order-book missing orders.
+- Deep samples use `order_type` values `0`, `1`, and `U`, not `A`, `D`, and `S`.
+  - Verified mapping used by the event builder: `0 -> order_add`, `1 -> order_cancel`, `U -> session`.
+  - The raw `order_type` value remains unchanged in normalized `orders.parquet`.
+- Validator now treats a quote level of `price=0, qty=0` and an absent reconstructed level as the same empty level.
+- Import now writes `missing_order_report.parquet` next to `validation_report.parquet` for objective follow-up diagnostics.
+
+## Phase 3.5 Verified Metrics
+- Baseline before Phase 3.5 fixes across 11 samples:
+  - `checked_quotes = 47608`
+  - `mismatch_count = 589167`
+  - `price_mismatch_count = 554366`
+  - `qty_mismatch_count = 586422`
+  - `missing_order_count = 764793`
+- Final after Phase 3.5 fixes across 11 samples:
+  - `checked_quotes = 47608`
+  - `mismatch_count = 188276`
+  - `price_mismatch_count = 136232`
+  - `qty_mismatch_count = 183738`
+  - `missing_order_count = 87841`
+- The fixes materially improved reconstruction and validation, but raw reconstructed top10 is not yet perfectly equal to every quote snapshot.
+- A sorting experiment that moved quotes to the end of each same-second bucket improved some symbols, but worsened the total result (`mismatch_count = 210944`), so it was not adopted as a global rule.
+
+## Remaining Objective Uncertainty
+- Some residual mismatches appear around auction/open transitions and within high-activity seconds where quote timestamps and tick event timestamps may not represent a strict millisecond-before/after relationship.
+- The current task did not implement quote-overwrite anchoring. Raw order-book validation remains an error-measurement path; a future visible-book layer can use quote snapshots as aggregate display anchors without fabricating order ids.

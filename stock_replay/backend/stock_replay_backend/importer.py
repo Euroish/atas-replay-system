@@ -119,6 +119,18 @@ class SessionImporter:
                 null_bytes_removed=0,
             )
         )
+        missing_order_path = processed_dir / "missing_order_report.parquet"
+        validation_result.missing_order_report.write_parquet(missing_order_path, compression="zstd")
+        artifacts.append(
+            ImportArtifact(
+                name="missing_order_report",
+                source_file="generated",
+                parquet_file=str(missing_order_path),
+                encoding="derived",
+                source_rows=validation_result.missing_order_report.height,
+                null_bytes_removed=0,
+            )
+        )
 
         summary = ImportSummary(
             session_id=f"{symbol}-{trade_date}",
@@ -160,7 +172,7 @@ class SessionImporter:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Import one replay session into standardized Parquet files.")
     backend_dir = Path(__file__).resolve().parent.parent
-    default_source = backend_dir.parent.parent / "实例材料" / "600726.SH"
+    default_source = backend_dir.parent.parent / "实例材料" / "个股数据" / "600726.SH"
     parser.add_argument(
         "--source-dir",
         type=Path,

@@ -19,6 +19,7 @@ class ValidationSummary:
 @dataclass(frozen=True)
 class ValidationResult:
     report: pl.DataFrame
+    missing_order_report: pl.DataFrame
     summary: ValidationSummary
 
 
@@ -44,14 +45,19 @@ class OrderBookValidator:
             mismatch_rows.extend(self._compare_quote_to_book(quote_row, event, snapshot))
 
         report = pl.from_dicts(mismatch_rows) if mismatch_rows else self._empty_report()
+        missing_order_report = (
+            pl.from_dicts(engine.missing_order_log, schema=self._missing_order_schema(), strict=False)
+            if engine.missing_order_log
+            else self._empty_missing_order_report()
+        )
         summary = ValidationSummary(
             checked_quotes=checked_quotes,
             mismatch_count=report.height,
             price_mismatch_count=report.filter(pl.col("price_match") == False).height,
             qty_mismatch_count=report.filter(pl.col("qty_match") == False).height,
-            missing_order_count=len(engine.missing_order_log),
+            missing_order_count=missing_order_report.height,
         )
-        return ValidationResult(report=report, summary=summary)
+        return ValidationResult(report=report, missing_order_report=missing_order_report, summary=summary)
 
     def _compare_quote_to_book(
         self,
@@ -69,6 +75,9 @@ class OrderBookValidator:
                 actual_level = actual_levels[level - 1] if level - 1 < len(actual_levels) else None
                 actual_price = actual_level.price_int if actual_level else None
                 actual_qty = actual_level.qty if actual_level else None
+                if self._is_empty_level(expected_price, expected_qty) and actual_level is None:
+                    continue
+
                 price_match = expected_price == actual_price
                 qty_match = expected_qty == actual_qty
 
@@ -115,3 +124,27 @@ class OrderBookValidator:
             }
         )
 
+    @staticmethod
+    def _empty_missing_order_report() -> pl.DataFrame:
+        return pl.DataFrame(schema=OrderBookValidator._missing_order_schema())
+
+    @staticmethod
+    def _missing_order_schema() -> dict[str, pl.DataType]:
+        return {
+            "reason": pl.String,
+            "event_id": pl.Int64,
+            "event_type": pl.String,
+            "ts_ms": pl.Int64,
+            "session": pl.String,
+            "source_seq": pl.Int64,
+            "price_int": pl.Int64,
+            "qty": pl.Int64,
+            "order_id": pl.String,
+            "ref_side": pl.String,
+            "requested_qty": pl.Int64,
+            "remaining_qty": pl.Int64,
+        }
+
+    @staticmethod
+    def _is_empty_level(price_int: object, qty: object) -> bool:
+        return price_int in {None, 0} and qty in {None, 0}

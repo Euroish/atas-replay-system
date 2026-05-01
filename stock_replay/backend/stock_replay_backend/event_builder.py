@@ -13,6 +13,13 @@ EVENT_PRIORITY = {
     "quote": 3,
 }
 
+ORDER_EVENT_TYPE = {
+    "A": "order_add",
+    "0": "order_add",
+    "D": "order_cancel",
+    "1": "order_cancel",
+}
+
 
 @dataclass(frozen=True)
 class EventBuildResult:
@@ -44,12 +51,7 @@ class EventBuilder:
         )
 
         order_events = orders.with_columns(
-            pl.when(pl.col("order_type") == "A")
-            .then(pl.lit("order_add"))
-            .when(pl.col("order_type") == "D")
-            .then(pl.lit("order_cancel"))
-            .otherwise(pl.lit("session"))
-            .alias("event_type")
+            pl.col("order_type").replace_strict(ORDER_EVENT_TYPE, default="session").alias("event_type")
         ).with_columns(pl.col("event_type").replace_strict(EVENT_PRIORITY).alias("priority"))
 
         session_warning_count = order_events.filter(pl.col("event_type") == "session").height
@@ -102,4 +104,3 @@ class EventBuilder:
         )
         events = events.with_row_index(name="event_id", offset=1)
         return EventBuildResult(events=events, warnings=warnings)
-

@@ -284,10 +284,11 @@ atas回放系统/
 │  ├─ heatmap.png
 │  ├─ 足迹图放大.png
 │  ├─ 足迹图缩小，k线.png
-│  └─ 600726.SH/
-│     ├─ 行情.csv
-│     ├─ 逐笔委托.csv
-│     └─ 逐笔成交.csv
+│  └─ 个股数据/
+│     └─ 600726.SH/
+│        ├─ 行情.csv
+│        ├─ 逐笔委托.csv
+│        └─ 逐笔成交.csv
 └─ stock_replay/
    ├─ backend/
    ├─ frontend/
@@ -303,7 +304,8 @@ atas回放系统/
    │  │     ├─ orderbook_checkpoints.parquet
    │  │     ├─ heatmap_segments.parquet
    │  │     ├─ footprint_1s.parquet
-   │  │     └─ validation_report.parquet
+   │  │     ├─ validation_report.parquet
+   │  │     └─ missing_order_report.parquet
    │  └─ app.db
    └─ logs/
       ├─ import/
@@ -372,16 +374,16 @@ HHMMSSmmm -> hour * 3600000 + minute * 60000 + second * 1000 + millisecond
 | --- | --- |
 | `order_no` | 委托编号 |
 | `exchange_order_id` | 交易所委托号，订单簿主键 |
-| `order_type` | `A` 新增、`D` 撤单、`S` 状态或其他 |
+| `order_type` | 原始委托类型；上交所样例含 `A/D/S`，深交所样例含 `0/1/U` |
 | `side` | `B` 买、`S` 卖、`I/unknown` 状态或未知 |
 | `price_int` | 委托价格 |
 | `qty` | 委托数量 |
 
-导入规则：
+入簿规则：
 
-- `A`：进入订单簿。
-- `D`：按 `exchange_order_id` 从订单簿扣减或移除。
-- `S`：作为交易阶段事件进入 event stream，不进入订单簿。
+- `A`、`0`：进入订单簿。
+- `D`、`1`：按 `exchange_order_id` 从订单簿扣减或移除。
+- `S`、`U`、其他无法识别类型：作为非入簿事件进入 event stream，不进入订单簿。
 - 无法识别字段写入 `import_warning`，不中断全量导入。
 
 ### 7.4 trades.parquet
@@ -460,7 +462,7 @@ ask_levels:
 新增委托：
 
 ```text
-order_type = A
+order_type = A / 0
 1. 校验 exchange_order_id、side、price_int、qty。
 2. 写入 orders_by_id。
 3. 按 side 增加 bid_levels 或 ask_levels。
@@ -470,7 +472,7 @@ order_type = A
 撤单：
 
 ```text
-order_type = D
+order_type = D / 1
 1. 按 exchange_order_id 查订单。
 2. 找不到订单：记录 missing_cancel_order，不伪造订单。
 3. 找到订单：扣减 remaining_qty，通常按撤单 qty 或剩余量取较小值。
@@ -482,11 +484,12 @@ order_type = D
 
 ```text
 event_type = trade
-1. 根据 ask_order_id 扣卖单，根据 bid_order_id 扣买单。
-2. 找不到订单：记录 missing_trade_order。
-3. 扣减后 remaining_qty 不得小于 0。
-4. level total_qty 不得小于 0。
-5. 根据 aggressor_side 生成主动买/主动卖成交统计。
+1. `aggressor_side = B` 时，ask_order_id 为被动侧卖单，必须扣减；bid_order_id 如果当前账本中存在则扣减，不存在不计为 missing order。
+2. `aggressor_side = S` 时，bid_order_id 为被动侧买单，必须扣减；ask_order_id 如果当前账本中存在则扣减，不存在不计为 missing order。
+3. 被动侧找不到订单：记录 missing_trade_order。
+4. 扣减后 remaining_qty 不得小于 0。
+5. level total_qty 不得小于 0。
+6. 根据 aggressor_side 生成主动买/主动卖成交统计。
 ```
 
 ### 8.3 快照校验
@@ -508,13 +511,33 @@ quote_bid10 / quote_ask10
 | `ts_ms` | 快照时间 |
 | `side` | bid/ask |
 | `level` | 1-10 |
-| `price_int_quote` | 快照价格 |
-| `qty_quote` | 快照数量 |
-| `price_int_engine` | 引擎价格 |
-| `qty_engine` | 引擎数量 |
+| `expected_price_int` | 快照价格 |
+| `expected_qty` | 快照数量 |
+| `actual_price_int` | 引擎价格 |
+| `actual_qty` | 引擎数量 |
 | `price_match` | 价格是否一致 |
-| `qty_diff` | 数量差异 |
-| `reason` | missing order、session gap、source gap、unknown |
+| `qty_match` | 数量是否一致 |
+
+空档位规则：
+
+```text
+quote price=0 且 qty=0
+  等价于
+engine 无该 level
+```
+
+另输出 `missing_order_report.parquet`：
+
+| 字段 | 说明 |
+| --- | --- |
+| `reason` | missing_trade_order、missing_cancel_order、qty_shortfall、invalid_* |
+| `event_id` | 对应事件编号 |
+| `event_type` | 事件类型 |
+| `ts_ms` | 事件时间 |
+| `session` | 交易阶段 |
+| `source_seq` | 源表序号 |
+| `order_id` | 涉及订单号 |
+| `ref_side` | trade 中引用的 ask/bid 侧 |
 
 验收标准：
 
@@ -1207,7 +1230,7 @@ validation_runs:
 
 验收：
 
-- 可导入 `实例材料/600726.SH`。
+- 可导入 `实例材料/个股数据/600726.SH`。
 - 输出行数与原始文件一致减表头。
 - `time_raw`、`ts_ms`、`price_int`、`symbol`、`trade_date` 正确。
 - 导入 warning 可查看。
@@ -1231,12 +1254,13 @@ validation_runs:
 目标：
 
 - 用 `行情.csv` 的买卖 10 档校验引擎 top10。
-- 输出 validation report。
+- 输出 validation report 和 missing order report。
 
 验收：
 
-- 可统计 price mismatch、qty diff、missing order。
+- 可统计 price mismatch、qty mismatch、missing order。
 - 可定位具体 ts、side、level。
+- missing order 可按 reason、session、source_seq、event_id 定位。
 - UI 或 CLI 能展示校验摘要。
 
 ### Phase 4：回放服务

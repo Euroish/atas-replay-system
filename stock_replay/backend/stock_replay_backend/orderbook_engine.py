@@ -84,11 +84,37 @@ class OrderBookEngine:
 
         ask_order_id = self._as_string(event.get("ask_order_id"))
         bid_order_id = self._as_string(event.get("bid_order_id"))
+        aggressor_side = self._normalize_side(event.get("aggressor_side"))
+
+        if aggressor_side == "B":
+            self._remove_trade_order(ask_order_id, trade_qty, event=event, ref_side="ask", required=True)
+            self._remove_trade_order(bid_order_id, trade_qty, event=event, ref_side="bid", required=False)
+            return
+        if aggressor_side == "S":
+            self._remove_trade_order(bid_order_id, trade_qty, event=event, ref_side="bid", required=True)
+            self._remove_trade_order(ask_order_id, trade_qty, event=event, ref_side="ask", required=False)
+            return
 
         if ask_order_id:
             self._remove_order(ask_order_id, trade_qty, reason="missing_trade_order", event=event, ref_side="ask")
         if bid_order_id:
             self._remove_order(bid_order_id, trade_qty, reason="missing_trade_order", event=event, ref_side="bid")
+
+    def _remove_trade_order(
+        self,
+        order_id: str,
+        trade_qty: int,
+        *,
+        event: dict[str, object],
+        ref_side: str,
+        required: bool,
+    ) -> None:
+        if required:
+            self._remove_order(order_id, trade_qty, reason="missing_trade_order", event=event, ref_side=ref_side)
+            return
+
+        if order_id in self.orders:
+            self._remove_order(order_id, trade_qty, reason="missing_trade_order", event=event, ref_side=ref_side)
 
     def _remove_order(
         self,
@@ -135,6 +161,10 @@ class OrderBookEngine:
             "event_id": event.get("event_id"),
             "event_type": event.get("event_type"),
             "ts_ms": event.get("ts_ms"),
+            "session": event.get("session"),
+            "source_seq": event.get("source_seq"),
+            "price_int": event.get("price_int"),
+            "qty": event.get("qty"),
         }
         payload.update(extra)
         self.missing_order_log.append(payload)
@@ -155,4 +185,3 @@ class OrderBookEngine:
         if value is None or value == "":
             return None
         return int(value)
-

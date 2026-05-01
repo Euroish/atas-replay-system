@@ -1,22 +1,25 @@
 # Task Plan
 
 ## Goal
-Implement `Phase 3：行情快照校验` so the sample session can compare reconstructed top10 bid/ask levels against `行情.csv` snapshots and produce a persisted validation report with inspectable summary metrics.
+Complete `Phase 3.5：订单簿对账收口` for the uploaded multi-symbol sample set. Fix the order-book reconstruction rule that produces inflated missing-order counts, keep the implementation faithful to observed data semantics, and verify the result against quote snapshots without starting Phase 4 replay/checkpoint work.
 
 ## Scope
-- Work only on backend validation against quote snapshots.
-- Reuse the existing `events.parquet` and `OrderBookEngine`.
-- Do not start checkpointing, replay service, or frontend display work yet.
+- Work only on backend import/event/order-book/validation logic.
+- Use `实例材料/个股数据/*` as the sample input set.
+- Do not build UI, replay clock, checkpointing, or quote-overwrite anchoring in this task.
+- Keep the external analysis markdown as evidence to verify, not as an authority.
 
 ## Phases
-1. Read `project.md` Phase 3 constraints and inspect the current backend interfaces - complete
-2. Confirm the quote schema and available top10 fields for validation - complete
-3. Implement `validator.py` and generate `validation_report.parquet` - complete
-4. Wire validation summary into the import output - complete
-5. Add tests and run real sample verification - complete
+1. Re-check current repo state and locate uploaded multi-symbol data - complete
+2. Run multi-symbol diagnostics for trade order-id matching and active/passive-side semantics - complete
+3. Implement the minimal order-book fix and diagnostic detail needed to explain missing orders - complete
+4. Update tests to cover passive-side trade depletion and the new sample location - complete
+5. Run backend tests and multi-symbol import validation - complete
+6. Record objective findings and remaining uncertainty - complete
 
 ## Success Criteria
-- `validation_report.parquet` is generated for the sample session.
-- The report can locate mismatches by `ts_ms`, `side`, and `level`.
-- Import output includes a usable validation summary.
-- Tests cover report generation and summary counts.
+- Trade depletion removes only order-book-relevant passive-side liquidity when the active-side order id is not represented as a resting order.
+- Missing-order counts drop materially on the uploaded sample set without introducing negative levels or quote overwrites.
+- Validation reports are still generated and remain locatable by `ts_ms`, `side`, and `level`.
+- Tests cover the corrected trade depletion semantics.
+- `findings.md` and `progress.md` record verified metrics objectively.
