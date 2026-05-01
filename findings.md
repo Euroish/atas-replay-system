@@ -140,3 +140,57 @@
   - Verified across all 11 symbols: `reproduced_mismatch_count = 0`.
   - The raw pre-checkpoint mismatch remains visible in `opening_alignment_report.parquet`; examples include `600726.SH = 20`, `300408.SZ = 20`, `000711.SZ = 20`, while `601609.SH` and `688819.SH` already have raw mismatch `0` at their first open quote.
 - Phase 3.6 supports the same conclusion as Phase 3.5: the residual gap is measurable and concentrated enough for follow-up design work, but it is not evidence that general continuous quote snapshots should overwrite the raw reconstructed book in Phase 3.
+
+## P3-P4 Replanning From Development Issue Notes
+- Read:
+  - `atas开发/开发过程问题/盘中匹配率优化分析.md`
+  - `atas开发/开发过程问题/Codex指导意见.md`
+  - `atas开发/project.md`
+- Core confirmed requirement:
+  - 集合竞价不是当前重点。
+  - 盘中 `09:31-11:30` and `13:00-14:57` 可见盘口匹配率需要达到 95%+。
+  - Current raw matching around 80%+ should remain a diagnostic signal, not the P4 success metric.
+- Important correction to avoid development drift:
+  - Quote anchor should not be treated as proof that the full inter-quote order book is真实完整.
+  - VisibleBook match rate must be reported separately from RawBook match rate.
+  - Correction/drift cost must be recorded so quote point alignment does not become a misleading vanity metric.
+- Adopted architecture boundary:
+  - RawBook remains pure order/trade/cancel reconstruction.
+  - VisibleBook is a display/replay layer anchored from quote snapshots.
+  - Quote anchoring must not overwrite RawBook and must not fabricate order IDs.
+- Revised phase interpretation:
+  - P3 ends at raw validation, residual diagnostics, and metric vocabulary.
+  - P4 starts with VisibleBook quote anchor and checkpoint generation.
+  - P4.0 should not include UI, Heatmap rendering, local sorting search, or smoothing heuristics.
+- Lower-priority / deferred ideas:
+  - Local ordering search is an offline experiment only until proven stable across symbols and sessions.
+  - Long-term correction layers such as `raw_qty + correction_qty` are risky when price levels shift; prefer anchor state plus event delta tape plus residual logs.
+  - Any fixed smoothing window such as 200ms requires data evidence before adoption.
+
+## Phase 3 Final State
+- Expanded final sample set: 17 symbol/date sessions.
+- Newly included high-activity samples:
+  - `002281.SZ`, `002384.SZ`, `300308.SZ`, `300502.SZ`, `603986.SH`, `688521.SH`
+- Final RawBook metrics:
+  - `checked_quotes = 76908`
+  - `compared_levels = 1538160`
+  - `raw_mismatch_count = 529389`
+  - `raw_price_mismatch_count = 439840`
+  - `raw_qty_mismatch_count = 495769`
+  - `raw_match_rate = 65.58%`
+  - `raw_price_match_rate = 71.40%`
+  - `raw_qty_match_rate = 67.77%`
+- Final盘中 raw window metrics:
+  - `09:31-11:30`: `65.92%`
+  - `13:00-14:57`: `69.19%`
+- Final missing-order metrics:
+  - `missing_trade_order = 398170`
+  - `qty_shortfall = 16263`
+  - `missing_cancel_order = 6892`
+- Opening boundary display reproduction:
+  - `17 / 17` sessions reproduced with `reproduced_mismatch_count = 0`.
+  - Raw opening mismatch total remains `232`, retained as diagnostic evidence.
+- Conclusion:
+  - Phase 3 is complete.
+  - The high-activity samples strengthen, not weaken, the P3 conclusion that RawBook is a residual diagnostic layer.
+  - P4 should target 95%+盘中 visible replay via VisibleBook quote-anchor checkpointing, while preserving RawBook as pure reconstruction.

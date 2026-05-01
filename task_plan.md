@@ -1,29 +1,86 @@
 # Task Plan
 
 ## Goal
-Complete `Phase 3.5：订单簿对账收口` for the uploaded multi-symbol sample set. Fix the order-book reconstruction rule that produces inflated missing-order counts, keep the implementation faithful to observed data semantics, and verify the result against quote snapshots without starting Phase 4 replay/checkpoint work.
+End Phase 3 with the expanded high-activity sample set, unify project state, and keep Phase 4 planned around VisibleBook quote-anchor checkpointing without corrupting RawBook semantics.
 
 ## Scope
-- Work only on backend import/event/order-book/validation logic.
-- Use `实例材料/个股数据/*` as the sample input set.
-- Do not build UI, replay clock, checkpointing, or quote-overwrite anchoring in this task.
-- Keep the external analysis markdown as evidence to verify, not as an authority.
+- Include all 17 sample directories under `实例材料/个股数据`.
+- Regenerate imports, validation reports, missing-order reports, residual diagnostics, and opening alignment diagnostics.
+- Update long-term phase boundaries in `atas开发/project.md` where needed.
+- Write final P3 summary.
+- Do not implement Phase 4 code in this planning task.
+- Do not change RawBook matching logic, event ordering, UI, Heatmap, DOM, or replay service code in this task.
 
-## Phases
-1. Re-check current repo state and locate uploaded multi-symbol data - complete
-2. Run multi-symbol diagnostics for trade order-id matching and active/passive-side semantics - complete
-3. Implement the minimal order-book fix and diagnostic detail needed to explain missing orders - complete
-4. Update tests to cover passive-side trade depletion and the new sample location - complete
-5. Run backend tests and multi-symbol import validation - complete
-6. Record objective findings and remaining uncertainty - complete
-7. Add Phase 3.6 residual diagnostics from persisted validation/missing-order reports - complete
-8. Add first-open-quote checkpoint reproduction for precise opening alignment - complete
+## Revised Phase Boundaries
 
-## Success Criteria
-- Trade depletion removes only order-book-relevant passive-side liquidity when the active-side order id is not represented as a resting order.
-- Missing-order counts drop materially on the uploaded sample set without introducing negative levels or quote overwrites.
-- Validation reports are still generated and remain locatable by `ts_ms`, `side`, and `level`.
-- Tests cover the corrected trade depletion semantics.
-- `findings.md` and `progress.md` record verified metrics objectively.
-- Residual diagnostics can be regenerated without modifying order-book reconstruction semantics.
-- Opening boundary alignment is explicitly reproducible for every sample symbol.
+### Phase 3：Raw 校验与指标口径锁定
+- Status: complete.
+- Purpose:
+  - Keep RawBook as pure order/trade/cancel reconstruction.
+  - Produce `validation_report.parquet` and `missing_order_report.parquet`.
+  - Report raw residuals by session/window/symbol/reason.
+  - Lock metric vocabulary:
+    - `raw_match_rate`
+    - `quote_anchor_match_rate`
+    - `inter_quote_drift`
+    - `correction_cost`
+  - Establish that盘中 95%+ should not be assigned to RawBook.
+- Out of scope:
+  - VisibleBook implementation.
+  - Replay clock.
+  - Checkpoint generation.
+  - UI/Heatmap/DOM rendering.
+
+### Phase 4.0：VisibleBook Quote Anchor 内核
+- Status: planned.
+- Purpose:
+  - Add a VisibleBook layer for display/replay state.
+  - At quote events, anchor VisibleBook to quote ask/bid top10.
+  - Preserve RawBook unchanged and record RawBook-vs-quote residual.
+  - Output visible validation/checkpoint artifacts.
+- Acceptance:
+  - RawBook is not overwritten by quote.
+  - No fake order IDs are generated.
+  - Quote-anchor visible match rate for `09:31-11:30` and `13:00-14:57` is at least 95%.
+  - `inter_quote_drift` and `correction_cost` are recorded.
+  - Existing backend tests still pass.
+
+### Phase 4.1：Checkpoint 与 Seek 闭环
+- Status: planned.
+- Purpose:
+  - Persist VisibleBook checkpoint state.
+  - Make repeated seek to the same timestamp deterministic.
+  - Keep checkpoint files rebuildable from normalized Parquet.
+- Acceptance:
+  - Seek does not replay from open.
+  - Same timestamp produces the same VisibleBook, residual metrics, and trade aggregates.
+  - Checkpoint source fields distinguish `quote_anchor`, `event_delta`, `correction`, and raw diagnostics.
+
+### Phase 4.2：Quote 间事件推进
+- Status: planned.
+- Purpose:
+  - Use order/cancel/trade events between quote anchors to animate visible liquidity.
+  - Re-anchor at the next quote and record drift/correction cost.
+- Acceptance:
+  - Inter-quote animation is explicitly labeled as event-derived projection.
+  - Drift is measurable before re-anchor.
+  - No smoothing window such as 200ms is adopted without evidence.
+
+### Phase 4.3：Raw 排序实验，仅作增强
+- Status: deferred.
+- Purpose:
+  - Evaluate local ordering experiments offline.
+  - Only promote a rule if it improves most symbols/windows without raising missing orders or harming trade statistics.
+- Out of scope for P4.0:
+  - Local sorting search as production replay logic.
+  - Fitting event order solely to match quote.
+
+## Success Criteria For This Planning Task
+- All 17 samples import successfully.
+- Final Phase 3 metrics are generated and recorded.
+- `phase3_final_summary.md` exists.
+- `atas开发/project.md` reflects the RawBook/VisibleBook boundary.
+- P3 no longer promises raw 95% matching.
+- P4 defines VisibleBook quote anchor/checkpoint as the path to盘中 95%+.
+- Planning files record why P3 is complete and what P4 starts with.
+- No code semantics are changed beyond existing diagnostics support.

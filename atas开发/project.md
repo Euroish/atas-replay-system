@@ -546,7 +546,56 @@ engine 无该 level
 - 校验报告必须能按时间段、side、level 聚合误差。
 - 当误差超过阈值时 UI 显示数据可信度提示，不隐藏问题。
 
+### 8.4 盘口复现口径
+
+必须区分 RawBook 和 VisibleBook，避免用单一“匹配率”混淆数据质量与显示复现。
+
+```text
+RawBook:
+  来源：逐笔委托、撤单、成交。
+  职责：订单生命周期、成交扣减、missing order 诊断、订单流基础状态。
+  约束：不得用 quote 覆盖，不得伪造 order_id。
+
+VisibleBook:
+  来源：quote top10 锚点 + quote 间逐笔事件推演。
+  职责：DOM、Heatmap、回放 checkpoint 的可见盘口状态。
+  约束：quote 锚定只作用于显示/回放层，不反向污染 RawBook。
+```
+
+匹配率口径：
+
+| 指标 | 定义 | 用途 |
+| --- | --- | --- |
+| `raw_match_rate` | RawBook top10 vs quote top10 | 数据质量和残差诊断 |
+| `quote_anchor_match_rate` | quote 锚定后的 VisibleBook vs quote top10 | quote 点可见盘口复现 |
+| `inter_quote_drift` | 两个 quote 之间事件推演状态到下一个 quote 的偏差 | 衡量动画/回放连续性 |
+| `correction_cost` | 每次重新锚定所需的价格层差异和数量差异 | 衡量 quote anchor 对盘口的修正成本 |
+
+开发判断：
+
+- 盘中 `raw_match_rate` 不作为 95%+ 验收目标。
+- 盘中 95%+ 目标只适用于 VisibleBook 的 quote 锚定与 checkpoint 输出。
+- Footprint、Delta、Volume Profile 的成交量基础来自 `trades.parquet`，RawBook 只提供盘口背景和订单状态辅助。
+- 局部排序搜索、平滑修正窗口、复杂 correction 只能作为后续实验，不作为 P4.0 主线。
+
 ## 9. 回放引擎
+
+Phase 4 回放引擎必须同时维护两类状态：
+
+```text
+RawBookState:
+  纯逐笔重建状态，用于诊断、订单流、成交背景。
+
+VisibleBookState:
+  quote anchor 后的可见盘口状态，用于 DOM、Heatmap、checkpoint、WebSocket frame。
+```
+
+二者必须同源于标准化事件流，但边界不同：
+
+- RawBook 处理 order/trade/cancel，不接受 quote 覆盖。
+- VisibleBook 在 quote 事件处锚定到 quote top10，并记录 RawBook 与 quote 的残差。
+- quote 间可用逐笔事件推动 VisibleBook 形成动画层，但到下一个 quote 必须重新锚定并记录 drift/correction。
+- 任何 frame、checkpoint、DOM 或 Heatmap 数据必须标明来源是 raw、quote_anchor、event_delta 或 correction。
 
 ### 9.1 虚拟时钟
 
@@ -607,14 +656,16 @@ current_ts_ms = min(current_ts_ms + virtual_elapsed, end_ts_ms)
 策略：
 
 - 默认每 1 秒或 5 秒保存一个 checkpoint。
-- checkpoint 存储 `orders_by_id` 的压缩状态、bid/ask levels、累计指标。
+- checkpoint 至少包含 VisibleBook topN、quote anchor 信息、RawBook 残差指标和累计成交指标。
+- RawBook 的 `orders_by_id` 压缩状态可以作为 seek 加速数据保存，但不得由 quote 锚定层伪造订单。
 - seek 时加载目标时间之前最近 checkpoint，再重放差量事件。
 
 验收标准：
 
 - 跳转到任意时间不需要从开盘重新回放。
-- 同一时间点重复 seek，订单簿 top10 和指标结果一致。
+- 同一时间点重复 seek，VisibleBook top10、RawBook 残差指标和成交指标结果一致。
 - checkpoint 文件可重建，不作为唯一不可恢复数据源。
+- 盘中 `09:31-11:30`、`13:00-14:57` 的 quote anchor/checkpoint 可见盘口匹配率应达到 95%+。
 
 ## 10. Heatmap 设计
 
@@ -1255,6 +1306,8 @@ validation_runs:
 
 - 用 `行情.csv` 的买卖 10 档校验引擎 top10。
 - 输出 validation report 和 missing order report。
+- 拆分并固定 `raw_match_rate`、`quote_anchor_match_rate`、`inter_quote_drift`、`correction_cost` 等指标口径。
+- 对盘中 `09:31-11:30`、`13:00-14:57` 单独统计 raw 残差，证明后续优化目标是否应进入 VisibleBook。
 
 验收：
 
@@ -1262,11 +1315,15 @@ validation_runs:
 - 可定位具体 ts、side、level。
 - missing order 可按 reason、session、source_seq、event_id 定位。
 - UI 或 CLI 能展示校验摘要。
+- 不把 raw book 强行调到 95% 作为 P3 验收。
+- P3 结束时必须明确哪些问题属于 raw 数据残差，哪些问题进入 P4 的 visible replay/checkpoint。
 
 ### Phase 4：回放服务
 
 目标：
 
+- 新增 VisibleBook 层，quote 到来时锚定为可见盘口状态。
+- 输出 visible/checkpoint 数据和 RawBook residual/correction 成本。
 - 实现虚拟时钟、播放、暂停、倍速、seek。
 - 实现 checkpoint。
 - 实现 WebSocket frame 推送。
@@ -1274,6 +1331,10 @@ validation_runs:
 
 验收：
 
+- RawBook 不被 quote 覆盖，不伪造 order_id。
+- 盘中 `09:31-11:30`、`13:00-14:57` 的 VisibleBook quote anchor/checkpoint 匹配率达到 95%+。
+- 每个 checkpoint 可追溯来源：quote_anchor、event_delta、correction 或 raw diagnostic。
+- 记录 `inter_quote_drift` 与 `correction_cost`，不把 quote 点 100% 对齐伪装成完整真实盘口。
 - 同一 ts 重复 seek 输出一致。
 - 100x 回放不阻塞 UI。
 - seek 不从开盘全量重放。

@@ -102,3 +102,49 @@
   - raw open-boundary mismatch remains recorded separately as diagnostic context
 - Ran `..\.venv\Scripts\python.exe -m pytest` from `stock_replay/backend`; result: `10 passed`.
 - No continuous quote-overwrite anchoring, replay clock, UI, or Phase 4 work was added.
+
+## 2026-05-01 P3-P4 Replanning
+- Read `atas开发/开发过程问题/盘中匹配率优化分析.md`.
+- Read `atas开发/开发过程问题/Codex指导意见.md`.
+- Re-read `atas开发/project.md` as the authoritative project document.
+- Replanned the P3-P4 boundary:
+  - P3 is now defined as RawBook validation, residual diagnosis, and metric vocabulary lock.
+  - P4.0 is the first implementation phase for VisibleBook quote-anchor checkpointing.
+  - P4.1 covers deterministic checkpoint/seek.
+  - P4.2 covers event-derived inter-quote animation and drift measurement.
+  - P4.3 keeps local sorting search deferred as an offline experiment.
+- Updated `atas开发/project.md` to add:
+  - RawBook vs VisibleBook boundary.
+  - `raw_match_rate`, `quote_anchor_match_rate`, `inter_quote_drift`, and `correction_cost` definitions.
+  - P4 checkpoint requirements for visible state, residual metrics, and source attribution.
+  - Revised Phase 3 and Phase 4 goals and acceptance criteria.
+- Replaced `task_plan.md` with the current P3-P4 replanning task.
+- No backend code or data semantics were changed in this replanning step.
+
+## 2026-05-01 Phase 3 Finalization
+- Added 6 high-activity sample sessions to the final Phase 3 run:
+  - `002281.SZ`, `002384.SZ`, `300308.SZ`, `300502.SZ`, `603986.SH`, `688521.SH`
+- Final Phase 3 sample set now contains 17 sessions.
+- Re-imported all 17 sessions from `实例材料/个股数据`.
+- Regenerated validation, missing-order, residual diagnostic, and opening-alignment artifacts under `stock_replay/data/processed`.
+- Wrote ignored local summaries:
+  - `phase3_import_summaries.json`
+  - `phase3_final_summary.json`
+- Added tracked summary:
+  - `phase3_final_summary.md`
+- Final 17-session RawBook metrics:
+  - `checked_quotes = 76908`
+  - `compared_levels = 1538160`
+  - `raw_mismatch_count = 529389`
+  - `raw_match_rate = 65.58%`
+  - `09:31-11:30 raw_match_rate = 65.92%`
+  - `13:00-14:57 raw_match_rate = 69.19%`
+- Final missing-order totals:
+  - `missing_trade_order = 398170`
+  - `qty_shortfall = 16263`
+  - `missing_cancel_order = 6892`
+- Opening boundary reproduction remains complete:
+  - `17 / 17` sessions
+  - `reproduced_opening_mismatch_total = 0`
+- Ran `..\.venv\Scripts\python.exe -m pytest` from `stock_replay/backend`; result: `10 passed`.
+- Phase 3 is now closed. Phase 4 starts with VisibleBook quote-anchor checkpointing.
