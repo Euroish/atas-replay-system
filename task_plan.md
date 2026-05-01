@@ -1,32 +1,32 @@
 # Task Plan
 
 ## Goal
-Advance Phase 4 by delivering the first backend VisibleBook quote-anchor checkpoint loop while preserving RawBook semantics.
+Advance P4.1 by implementing deterministic VisibleBook checkpoint seek/readback without replaying from open.
 
 ## Scope
-- Read `atas开发/project.md` and follow its P4 boundaries.
-- Add a VisibleBook layer that anchors visible top10 state from quote events.
-- Persist checkpoint rows with source attribution and raw residual metrics.
-- Report `quote_anchor_match_rate`, `inter_quote_drift_abs_qty`, and `correction_cost`.
-- Verify the 17-session sample set reaches at least 95% visible quote-anchor match rate for:
-  - `09:31-11:30`
-  - `13:00-14:57`
+- Add a backend checkpoint store that reads persisted `visible_orderbook_checkpoints.parquet`.
+- Given `symbol`, `trade_date`, and `ts_ms`, return the latest checkpoint at or before `ts_ms`.
+- Return deterministic ask/bid top10 plus source, raw residual, and correction metadata.
+- Do not implement replay virtual clock, WebSocket frame push, quote-between animation, or UI.
 
 ## Completed
-- Added `stock_replay/backend/stock_replay_backend/visible_book.py`.
-- Updated importer output with `visible_orderbook_checkpoints.parquet`.
-- Added `visible_book_summary` to import reports.
-- Added and updated backend tests.
-- Re-imported all 17 sample sessions.
-- Updated `atas开发/project.md`, `findings.md`, and `progress.md`.
+- Added `stock_replay/backend/stock_replay_backend/checkpoint_store.py`.
+- Added `VisibleCheckpointStore.load_checkpoint(symbol, trade_date, ts_ms, depth=10)`.
+- Added tests for latest-at-or-before lookup, deterministic repeat seek, depth limiting, and pre-first-checkpoint rejection.
+- Verified a real `600726.SH` checkpoint seek at `34260000`.
+- Updated `atas开发/project.md`, `findings.md`, `progress.md`, and this task plan.
 
 ## Verified Results
-- Backend tests: `11 passed`.
-- 17-session checkpoint rows: `1538160`.
-- Aggregate `quote_anchor_match_rate`: `100%`.
-- `09:31-11:30 quote_anchor_match_rate`: `100%`.
-- `13:00-14:57 quote_anchor_match_rate`: `100%`.
-- Aggregate `correction_cost`: `12866109226`.
+- Backend tests: `14 passed`.
+- Real sample seek:
+  - symbol/date: `600726.SH` / `20260424`
+  - target `ts_ms = 34260000`
+  - returned checkpoint `ts_ms = 34260000`
+  - returned `quote_seq = 224`
+  - ask levels: `10`
+  - bid levels: `10`
+  - repeated seek result: deterministic
+- Latest state: P4.1 minimum backend checkpoint readback is complete; replay engine work remains.
 
 ## Out Of Scope For This Step
 - Replay virtual clock.
@@ -36,4 +36,4 @@ Advance Phase 4 by delivering the first backend VisibleBook quote-anchor checkpo
 - UI, Heatmap, DOM, or Footprint rendering changes.
 
 ## Next Phase 4 Step
-Implement checkpoint seek/readback so repeated seek to the same timestamp returns deterministic VisibleBook state without replaying from open.
+Build the replay-facing frame/load layer on top of `VisibleCheckpointStore`, then add virtual clock and WebSocket streaming.

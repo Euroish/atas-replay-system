@@ -605,6 +605,10 @@ P4.0 的最小落盘 artifact 是 `visible_orderbook_checkpoints.parquet`：
 - `raw_price_int` / `raw_qty` 保留同一时刻 RawBook top10 诊断值。
 - `quote_anchor_match`、`inter_quote_drift_abs_qty`、`correction_cost` 必须可统计。
 - `source` 当前为 `quote_anchor`；后续 quote 间推进再扩展 `event_delta`、`correction`。
+- 当前状态：P4.0 已完成并验证，17 个样本共 `1538160` checkpoint rows，盘中两个目标窗口 `quote_anchor_match_rate = 100%`。
+- P4.0 的 100% 是 quote anchor 构造性对齐，只代表 VisibleBook quote 点显示状态可复现，不代表 RawBook 已 100% 重建盘口。
+- 当前下一步是 P4.1 checkpoint seek/readback：输入 symbol/date/ts_ms，读取不晚于目标时间的最近 VisibleBook checkpoint，重复 seek 同一时间必须返回一致结果，且不得从开盘全量重放。
+- P4.1 最小后端读取层已完成：`VisibleCheckpointStore.load_checkpoint(symbol, trade_date, ts_ms)` 可读取不晚于目标时间的最近 `visible_orderbook_checkpoints.parquet` checkpoint，返回 ask/bid top10、source、raw residual 和 correction 成本；完整 replay engine、virtual clock、WebSocket 仍未完成。
 
 ### 9.1 虚拟时钟
 
@@ -1079,7 +1083,7 @@ backend/
 | `orderbook_engine.py` | 逐笔维护订单簿 |
 | `visible_book.py` | 生成 quote-anchor 可见盘口 checkpoint，并记录 raw residual、inter-quote drift、correction cost |
 | `validator.py` | 用 quote top10 校验订单簿 |
-| `checkpoint_store.py` | checkpoint 写入、读取、压缩 |
+| `checkpoint_store.py` | checkpoint seek/readback；读取 VisibleBook checkpoint 并返回确定性的 ask/bid top10 与 residual/correction 元数据 |
 | `replay_engine.py` | 按窗口隔离的虚拟时钟、倍速、seek、WebSocket 推送 |
 | `heatmap_builder.py` | liquidity segment 生成和切片查询 |
 | `footprint_builder.py` | 1s 聚合和周期合成 |
@@ -1333,8 +1337,9 @@ validation_runs:
 
 目标：
 
-- 新增 VisibleBook 层，quote 到来时锚定为可见盘口状态。
-- 输出 visible/checkpoint 数据和 RawBook residual/correction 成本。
+- 已完成 P4.0：新增 VisibleBook 层，quote 到来时锚定为可见盘口状态。
+- 已完成 P4.0：输出 visible/checkpoint 数据和 RawBook residual/correction 成本。
+- 已完成 P4.1 最小后端读取层：实现 checkpoint seek/readback。
 - 实现虚拟时钟、播放、暂停、倍速、seek。
 - 实现 checkpoint。
 - 实现 WebSocket frame 推送。

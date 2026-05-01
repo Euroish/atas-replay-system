@@ -220,3 +220,33 @@
   - `13:00-14:57 quote_anchor_match_rate = 100%`
   - aggregate `correction_cost = 12866109226`
 - This satisfies the P4.0 quote-anchor checkpoint target, but it does not yet satisfy the full Phase 4 replay service target because seek, virtual clock, WebSocket frames, and inter-quote animation are not implemented.
+
+## P4.0 Process Draft Cleanup Findings
+- `atas开发/开发过程问题/P4.0 开发进展分析.md` confirms the same state already recorded in current docs:
+  - P4.0 has completed import-time VisibleBook quote-anchor checkpoint generation.
+  - P4.0 has not implemented replay virtual clock, checkpoint seek/readback, WebSocket frames, quote-between animation, or UI/Heatmap/DOM.
+  - `quote_anchor_match_rate = 100%` is constructed from quote anchor rows and must not be interpreted as RawBook perfect reconstruction.
+- The older process drafts under `atas开发/开发过程问题` are now stale after P4.0 completion:
+  - `盘中匹配率优化分析.md`
+  - `Codex指导意见.md`
+  - `P4.0 开发进展分析.md`
+- Their durable conclusions are already represented in `atas开发/project.md`, `task_plan.md`, `findings.md`, and `progress.md`, so keeping the drafts would create parallel, lagging guidance.
+
+## P4.1 Checkpoint Seek/Readback Findings
+- `VisibleCheckpointStore` now provides the first backend readback path for `visible_orderbook_checkpoints.parquet`.
+- The readback path does not replay events from open; it reads the persisted checkpoint file and selects the latest `ts_ms <= target`.
+- Returned checkpoint state includes:
+  - `symbol`
+  - `trade_date`
+  - `checkpoint_id`
+  - `quote_seq`
+  - `event_id`
+  - `ts_ms`
+  - `session`
+  - ask/bid levels
+  - per-level `source`
+  - raw residual fields
+  - aggregate `correction_cost`
+  - aggregate `inter_quote_drift_abs_qty`
+- Verified deterministic repeat seek on both test data and real `600726.SH` checkpoint data.
+- This completes the minimum P4.1 backend checkpoint readback loop, but not the full replay service. Replay load/frame APIs, virtual clock, WebSocket streaming, and quote-between animation remain pending.

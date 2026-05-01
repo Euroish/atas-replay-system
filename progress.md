@@ -186,3 +186,48 @@
   - WebSocket frames
   - quote-between event-derived VisibleBook animation
   - UI/Heatmap/DOM changes
+
+## 2026-05-01 P4.0 State Clarification And Process Draft Cleanup
+- Read `atas开发/开发过程问题/P4.0 开发进展分析.md`.
+- Confirmed the latest state:
+  - P4.0 import-time VisibleBook quote-anchor checkpoint is complete.
+  - `quote_anchor_match_rate = 100%` is a quote-anchor display-layer result, not proof that RawBook reconstructs the full盘口 at 100%.
+  - Full Phase 4 replay service remains incomplete.
+  - Next step is P4.1 checkpoint seek/readback.
+- Updated `atas开发/project.md` to explicitly record P4.0 completion, the meaning of the 100% quote-anchor metric, and the P4.1 next step.
+- Archived by deletion the now-stale process drafts under `atas开发/开发过程问题` because their useful conclusions are already absorbed into `project.md`, `findings.md`, `progress.md`, and `task_plan.md`:
+  - `盘中匹配率优化分析.md`
+  - `Codex指导意见.md`
+  - `P4.0 开发进展分析.md`
+- No backend code, data semantics, or generated Parquet artifacts were changed.
+
+## 2026-05-01 P4.1 Checkpoint Seek/Readback
+- Added backend module:
+  - `stock_replay/backend/stock_replay_backend/checkpoint_store.py`
+- Implemented `VisibleCheckpointStore.load_checkpoint(symbol, trade_date, ts_ms, depth=10)`.
+- Readback behavior:
+  - loads `visible_orderbook_checkpoints.parquet` for the requested symbol/date
+  - selects the latest checkpoint with `checkpoint.ts_ms <= target ts_ms`
+  - returns ask/bid levels, source, raw residual fields, `correction_cost`, and `inter_quote_drift_abs_qty`
+  - rejects target times earlier than the first checkpoint
+- Added test:
+  - `stock_replay/backend/tests/test_checkpoint_store.py`
+- Test coverage includes:
+  - latest-at-or-before seek
+  - deterministic repeated seek
+  - depth limiting
+  - before-first-checkpoint error
+- Ran `..\.venv\Scripts\python.exe -m pytest` from `stock_replay/backend`; result: `14 passed`.
+- Verified real sample seek:
+  - `600726.SH`, `20260424`, target `ts_ms = 34260000`
+  - returned checkpoint `ts_ms = 34260000`
+  - returned `quote_seq = 224`
+  - returned 10 ask levels and 10 bid levels
+  - repeated readback was deterministic
+- Updated `atas开发/project.md` with the P4.1 minimum backend readback status.
+- Not implemented in this step:
+  - replay virtual clock
+  - replay load/frame API
+  - WebSocket streaming
+  - quote-between event-derived animation
+  - UI/Heatmap/DOM changes
