@@ -57,8 +57,9 @@ def test_import_sample_session() -> None:
     assert summary.validation_summary is not None
     assert summary.visible_book_summary is not None
     assert summary.visible_book_summary.quote_anchor_match_rate == 1.0
+    assert quotes["price_scale"][0] == 10_000
 
     report = json.loads((processed_dir / "import_report.json").read_text(encoding="utf-8"))
     assert report["warnings"]
-    assert report["validation_summary"]["checked_quotes"] == 5005
+    assert report["validation_summary"]["checked_quotes"] == quotes.filter(pl.col("session") != "auction").height
     assert report["visible_book_summary"]["quote_anchor_match_rate"] == 1.0

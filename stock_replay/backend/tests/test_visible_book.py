@@ -24,7 +24,7 @@ def test_visible_book_anchors_quote_without_overwriting_raw_residual() -> None:
         "low_int": 1000,
         "open_int": 1000,
         "prev_close_int": 1000,
-        "price_scale": 1000,
+        "price_scale": 10_000,
     }
     for side in ("ask", "bid"):
         for level in range(1, 11):

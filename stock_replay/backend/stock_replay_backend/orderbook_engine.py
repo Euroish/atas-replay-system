@@ -11,12 +11,35 @@ class OrderState:
     side: str
     price_int: int
     qty: int
+    original_qty: int
+    add_ts_ms: int | None = None
+    source_seq: int | None = None
+    add_event_id: int | None = None
+    resting: bool = True
 
 
 @dataclass(frozen=True)
 class BookLevel:
     price_int: int
     qty: int
+
+
+@dataclass(frozen=True)
+class OrderQueueEntry:
+    order_id: str
+    qty: int
+    original_qty: int
+    add_ts_ms: int | None
+    source_seq: int | None
+    add_event_id: int | None
+    queue_position: int
+
+
+@dataclass(frozen=True)
+class BookQueueLevel:
+    price_int: int
+    total_qty: int
+    orders: tuple[OrderQueueEntry, ...]
 
 
 class OrderBookEngine:
@@ -36,6 +59,10 @@ class OrderBookEngine:
             self._apply_order_add(event)
         elif event_type == "order_cancel":
             self._apply_order_cancel(event)
+        elif event_type == "market_order":
+            self._apply_market_order(event)
+        elif event_type == "trade_cancel":
+            self._apply_order_cancel(event)
         elif event_type == "trade":
             self._apply_trade(event)
 
@@ -52,6 +79,12 @@ class OrderBookEngine:
         ][:depth]
         return {"bids": bids, "asks": asks}
 
+    def snapshot_order_queues(self, depth: int | None = None) -> dict[str, list[BookQueueLevel]]:
+        return {
+            "bids": self._snapshot_order_queue_side("B", reverse=True, depth=depth),
+            "asks": self._snapshot_order_queue_side("S", reverse=False, depth=depth),
+        }
+
     def _apply_order_add(self, event: dict[str, object]) -> None:
         order_id = self._as_string(event.get("exchange_order_id"))
         side = self._normalize_side(event.get("side"))
@@ -65,8 +98,43 @@ class OrderBookEngine:
         if order_id in self.orders:
             self._remove_order(order_id, self.orders[order_id].qty)
 
-        self.orders[order_id] = OrderState(order_id=order_id, side=side, price_int=price_int, qty=qty)
+        self.orders[order_id] = OrderState(
+            order_id=order_id,
+            side=side,
+            price_int=price_int,
+            qty=qty,
+            original_qty=qty,
+            add_ts_ms=self._as_int(event.get("ts_ms")),
+            source_seq=self._as_int(event.get("source_seq")),
+            add_event_id=self._as_int(event.get("event_id")),
+            resting=True,
+        )
         self._adjust_level(side, price_int, qty)
+
+    def _apply_market_order(self, event: dict[str, object]) -> None:
+        order_id = self._as_string(event.get("exchange_order_id"))
+        side = self._normalize_side(event.get("side"))
+        price_int = self._as_int(event.get("price_int"))
+        qty = self._as_int(event.get("qty"))
+
+        if not order_id or side not in {"B", "S"} or price_int is None or qty is None or qty <= 0:
+            self._log_missing("invalid_market_order", event, order_id=order_id, side=side)
+            return
+
+        if order_id in self.orders:
+            self._remove_order(order_id, self.orders[order_id].qty)
+
+        self.orders[order_id] = OrderState(
+            order_id=order_id,
+            side=side,
+            price_int=price_int,
+            qty=qty,
+            original_qty=qty,
+            add_ts_ms=self._as_int(event.get("ts_ms")),
+            source_seq=self._as_int(event.get("source_seq")),
+            add_event_id=self._as_int(event.get("event_id")),
+            resting=False,
+        )
 
     def _apply_order_cancel(self, event: dict[str, object]) -> None:
         order_id = self._as_string(event.get("exchange_order_id"))
@@ -88,17 +156,44 @@ class OrderBookEngine:
 
         if aggressor_side == "B":
             self._remove_trade_order(ask_order_id, trade_qty, event=event, ref_side="ask", required=True)
-            self._remove_trade_order(bid_order_id, trade_qty, event=event, ref_side="bid", required=False)
+            self._remove_active_trade_order(bid_order_id, trade_qty, event=event, ref_side="bid")
             return
         if aggressor_side == "S":
             self._remove_trade_order(bid_order_id, trade_qty, event=event, ref_side="bid", required=True)
-            self._remove_trade_order(ask_order_id, trade_qty, event=event, ref_side="ask", required=False)
+            self._remove_active_trade_order(ask_order_id, trade_qty, event=event, ref_side="ask")
             return
 
         if ask_order_id:
             self._remove_order(ask_order_id, trade_qty, reason="missing_trade_order", event=event, ref_side="ask")
         if bid_order_id:
             self._remove_order(bid_order_id, trade_qty, reason="missing_trade_order", event=event, ref_side="bid")
+
+    def _remove_active_trade_order(
+        self,
+        order_id: str,
+        trade_qty: int,
+        *,
+        event: dict[str, object],
+        ref_side: str,
+    ) -> None:
+        if self._is_sh_same_timestamp_active_order(order_id, event, ref_side=ref_side):
+            return
+        self._remove_trade_order(order_id, trade_qty, event=event, ref_side=ref_side, required=False)
+
+    def _is_sh_same_timestamp_active_order(
+        self,
+        order_id: str,
+        event: dict[str, object],
+        *,
+        ref_side: str,
+    ) -> bool:
+        if not self._as_string(event.get("symbol")).endswith(".SH"):
+            return False
+        order = self.orders.get(order_id)
+        if order is None or not order.resting:
+            return False
+        expected_side = "B" if ref_side == "bid" else "S"
+        return order.side == expected_side and order.add_ts_ms == self._as_int(event.get("ts_ms"))
 
     def _remove_trade_order(
         self,
@@ -132,7 +227,8 @@ class OrderBookEngine:
             return
 
         actual_remove_qty = min(remove_qty, order.qty)
-        self._adjust_level(order.side, order.price_int, -actual_remove_qty)
+        if order.resting:
+            self._adjust_level(order.side, order.price_int, -actual_remove_qty)
         order.qty -= actual_remove_qty
 
         if remove_qty > actual_remove_qty and reason and event is not None:
@@ -154,6 +250,45 @@ class OrderBookEngine:
         levels[price_int] = max(updated_qty, 0)
         if levels[price_int] == 0:
             levels.pop(price_int, None)
+
+    def _snapshot_order_queue_side(
+        self,
+        side: str,
+        *,
+        reverse: bool,
+        depth: int | None,
+    ) -> list[BookQueueLevel]:
+        price_to_orders: defaultdict[int, list[OrderState]] = defaultdict(list)
+        for order in self.orders.values():
+            if order.resting and order.side == side and order.qty > 0:
+                price_to_orders[order.price_int].append(order)
+
+        prices = sorted(price_to_orders, reverse=reverse)
+        if depth is not None:
+            prices = prices[:depth]
+
+        levels: list[BookQueueLevel] = []
+        for price_int in prices:
+            orders = tuple(
+                OrderQueueEntry(
+                    order_id=order.order_id,
+                    qty=order.qty,
+                    original_qty=order.original_qty,
+                    add_ts_ms=order.add_ts_ms,
+                    source_seq=order.source_seq,
+                    add_event_id=order.add_event_id,
+                    queue_position=index,
+                )
+                for index, order in enumerate(price_to_orders[price_int], start=1)
+            )
+            levels.append(
+                BookQueueLevel(
+                    price_int=price_int,
+                    total_qty=sum(order.qty for order in price_to_orders[price_int]),
+                    orders=orders,
+                )
+            )
+        return levels
 
     def _log_missing(self, reason: str, event: dict[str, object], **extra: object) -> None:
         payload = {

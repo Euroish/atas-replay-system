@@ -11,7 +11,7 @@ import polars as pl
 from .encoding import read_clean_text
 
 
-PRICE_SCALE = 1000
+PRICE_SCALE = 10_000
 
 
 @dataclass(frozen=True)
@@ -78,6 +78,7 @@ def normalize_orders(table: CsvTable) -> pl.DataFrame:
                 **_base_record(row, seq),
                 "order_no": _clean_cell(row["委托编号"]),
                 "exchange_order_id": _clean_cell(row["交易所委托号"]),
+                "message_seq": _to_int(row["交易所委托号"]),
                 "order_type": order_type,
                 "side": side,
                 "price_int": _to_int(row["委托价格"]),
@@ -95,6 +96,7 @@ def normalize_trades(table: CsvTable) -> pl.DataFrame:
             {
                 **_base_record(row, seq),
                 "trade_id": _clean_cell(row["成交编号"]),
+                "message_seq": _to_int(row["成交编号"]),
                 "trade_code": _clean_cell(row["成交代码"]),
                 "order_code": _clean_cell(row["委托代码"]),
                 "aggressor_side": _normalize_side(row["BS标志"]),
@@ -176,4 +178,3 @@ def _to_int(value: str | None) -> int | None:
     if not cleaned:
         return None
     return int(cleaned)
-

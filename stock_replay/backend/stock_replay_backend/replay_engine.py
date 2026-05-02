@@ -87,7 +87,7 @@ class ReplayEngine:
             status="paused",
             speed=speed,
             virtual_clock_ms=float(resolved_ts),
-            current_ts_ms=checkpoint.ts_ms,
+            current_ts_ms=resolved_ts,
             checkpoint_ts_ms=checkpoint.ts_ms,
             session=session,
         )
@@ -114,7 +114,7 @@ class ReplayEngine:
         state = self._require_state(workspace_id, window_id)
         checkpoint = state.session.load_checkpoint(ts_ms)
         state.virtual_clock_ms = float(ts_ms)
-        state.current_ts_ms = checkpoint.ts_ms
+        state.current_ts_ms = ts_ms
         state.checkpoint_ts_ms = checkpoint.ts_ms
         return self._build_frame(state, checkpoint)
 
@@ -126,8 +126,8 @@ class ReplayEngine:
             return self._build_frame_from_state(state)
 
         state.virtual_clock_ms += elapsed_ms * state.speed
-        checkpoint = state.session.load_checkpoint(int(state.virtual_clock_ms))
-        state.current_ts_ms = checkpoint.ts_ms
+        state.current_ts_ms = int(state.virtual_clock_ms)
+        checkpoint = state.session.load_checkpoint(state.current_ts_ms)
         state.checkpoint_ts_ms = checkpoint.ts_ms
         return self._build_frame(state, checkpoint)
 
@@ -184,7 +184,7 @@ class ReplayEngine:
             status=state.status,
             speed=state.speed,
             virtual_ts_ms=int(state.virtual_clock_ms),
-            current_ts_ms=checkpoint.ts_ms,
+            current_ts_ms=state.current_ts_ms,
             checkpoint_ts_ms=checkpoint.ts_ms,
             checkpoint=checkpoint_meta,
             orderbook_top=orderbook_top,

@@ -15,6 +15,10 @@ OPENING_ALIGNMENT_FILE = "opening_alignment_report.parquet"
 DIAGNOSTICS_FILE = "residual_diagnostics.json"
 OPEN_START_MS = 34_200_000
 OPEN_END_MS = 34_260_000
+CORE_INTRADAY_WINDOWS = [
+    ("09:31-11:30", 34_260_000, 41_400_000),
+    ("13:00-14:57", 46_800_000, 53_820_000),
+]
 
 
 def build_residual_diagnostics(processed_root: Path, output_dir: Path | None = None) -> dict[str, Any]:
@@ -44,6 +48,8 @@ def build_residual_diagnostics(processed_root: Path, output_dir: Path | None = N
             "qty_mismatch_count": _count_false(validation_reports, "qty_match"),
             "missing_order_count": missing_reports.height,
         },
+        "core_intraday": _build_core_intraday_summary(validation_reports),
+        "symbol_summaries": _build_symbol_summaries(validation_reports),
         "time_windows": time_windows,
         "opening_alignment": opening_alignment_details,
         "top_mismatch_buckets": top_bucket_details,
@@ -191,6 +197,78 @@ def _build_time_window_summary(validation_reports: pl.DataFrame) -> list[dict[st
             }
         )
     return summary
+
+
+def _build_core_intraday_summary(validation_reports: pl.DataFrame) -> dict[str, Any]:
+    core = _filter_time_windows(validation_reports, CORE_INTRADAY_WINDOWS)
+    total = core.height
+    return {
+        "mismatch_count": total,
+        "price_mismatch_count": _count_false(core, "price_match"),
+        "qty_mismatch_count": _count_false(core, "qty_match"),
+        "windows": [
+            {
+                "window": label,
+                "mismatch_count": window.height,
+                "price_mismatch_count": _count_false(window, "price_match"),
+                "qty_mismatch_count": _count_false(window, "qty_match"),
+                "share_of_core_mismatch": window.height / total if total else 0.0,
+            }
+            for label, window in (
+                (
+                    label,
+                    validation_reports.filter((pl.col("ts_ms") >= start_ms) & (pl.col("ts_ms") < end_ms)),
+                )
+                for label, start_ms, end_ms in CORE_INTRADAY_WINDOWS
+            )
+        ],
+    }
+
+
+def _build_symbol_summaries(validation_reports: pl.DataFrame) -> list[dict[str, Any]]:
+    if validation_reports.is_empty():
+        return []
+
+    keys = ["symbol", "trade_date", "exchange_code"]
+    full = _group_residual_counts(validation_reports, keys, "full_day")
+    core = _group_residual_counts(_filter_time_windows(validation_reports, CORE_INTRADAY_WINDOWS), keys, "core_intraday")
+    return (
+        full.join(core, on=keys, how="left")
+        .fill_null(0)
+        .sort(["core_intraday_mismatch_count", "full_day_mismatch_count", "symbol"], descending=[True, True, False])
+        .to_dicts()
+    )
+
+
+def _group_residual_counts(frame: pl.DataFrame, keys: list[str], prefix: str) -> pl.DataFrame:
+    if frame.is_empty():
+        return pl.DataFrame(
+            schema={
+                **{key: pl.String if key != "trade_date" else pl.Int64 for key in keys},
+                f"{prefix}_mismatch_count": pl.Int64,
+                f"{prefix}_price_mismatch_count": pl.Int64,
+                f"{prefix}_qty_mismatch_count": pl.Int64,
+            }
+        )
+
+    return frame.group_by(keys).agg(
+        [
+            pl.len().cast(pl.Int64).alias(f"{prefix}_mismatch_count"),
+            (~pl.col("price_match")).cast(pl.Int64).sum().alias(f"{prefix}_price_mismatch_count"),
+            (~pl.col("qty_match")).cast(pl.Int64).sum().alias(f"{prefix}_qty_mismatch_count"),
+        ]
+    )
+
+
+def _filter_time_windows(frame: pl.DataFrame, windows: list[tuple[str, int, int]]) -> pl.DataFrame:
+    if frame.is_empty() or not windows:
+        return frame
+
+    filters = [(pl.col("ts_ms") >= start_ms) & (pl.col("ts_ms") < end_ms) for _, start_ms, end_ms in windows]
+    predicate = filters[0]
+    for window_filter in filters[1:]:
+        predicate = predicate | window_filter
+    return frame.filter(predicate)
 
 
 def _build_top_bucket_details(

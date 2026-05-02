@@ -93,6 +93,9 @@ def test_build_residual_diagnostics_outputs_grouped_artifacts(tmp_path: Path) ->
         "qty_mismatch_count": 2,
         "missing_order_count": 1,
     }
+    assert diagnostics["core_intraday"]["mismatch_count"] == 0
+    assert diagnostics["symbol_summaries"][0]["full_day_mismatch_count"] == 2
+    assert diagnostics["symbol_summaries"][0]["core_intraday_mismatch_count"] == 0
     assert diagnostics["time_windows"][1]["window"] == "09:30-09:31"
     assert diagnostics["time_windows"][1]["mismatch_count"] == 2
     assert diagnostics["top_mismatch_buckets"][0]["raw_book_snapshot"]["ask"][0] == {

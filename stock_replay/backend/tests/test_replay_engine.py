@@ -30,7 +30,7 @@ def test_load_window_returns_checkpoint_frame(tmp_path: Path) -> None:
     )
 
     assert frame.status == "paused"
-    assert frame.current_ts_ms == 2000
+    assert frame.current_ts_ms == 2500
     assert frame.checkpoint_ts_ms == 2000
     assert frame.virtual_ts_ms == 2500
     assert frame.checkpoint["quote_seq"] == 2

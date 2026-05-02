@@ -38,9 +38,12 @@ class OrderBookValidator:
                 engine.apply_event(event)
                 continue
 
-            checked_quotes += 1
             quote_seq = int(event["source_seq"])
             quote_row = quote_lookup[quote_seq]
+            if quote_row["session"] == "auction":
+                continue
+
+            checked_quotes += 1
             snapshot = engine.snapshot_top_levels(depth=10)
             mismatch_rows.extend(self._compare_quote_to_book(quote_row, event, snapshot))
 

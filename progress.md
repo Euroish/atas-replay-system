@@ -262,3 +262,387 @@
   - FastAPI/WebSocket transport
   - frontend replay wiring
   - quote-between animation
+
+## 2026-05-01 Project Drift Repair
+- Re-read `task_plan.md`, `findings.md`, and `atas开发/project.md` to restore the active focus to P3/P4 order-book reproduction.
+- The drift being corrected was not code behavior; it was the working emphasis sliding from raw reconstruction and residual diagnosis toward replay plumbing.
+- Reviewed external reconstruction references to confirm the preferred strategy:
+  - snapshot-bound reconstruction with a pending queue and transactional order-event application
+  - event-stream-derived book state for order-driven markets
+- Reframed the active work as:
+  - keep `RawBook` canonical
+  - keep `VisibleBook` separate
+  - use residual diagnostics to decide whether remaining gaps are semantic, ordering-related, or true data loss
+- Updated working docs:
+  - `task_plan.md`
+  - `findings.md`
+- No backend code or generated artifacts were changed in this drift-repair step.
+
+## 2026-05-01 A-Share Order-Flow Rule Alignment
+- Verified Wind field semantics for A股 level-2 data:
+  - SZ `委托类型 = 0/1/U`
+  - `1/U` are market or best-price submissions, not cancellation codes
+  - SZ `成交代码 = C` is a cancellation-style execution report
+- Updated backend code:
+  - `stock_replay/backend/stock_replay_backend/event_builder.py`
+  - `stock_replay/backend/stock_replay_backend/orderbook_engine.py`
+- Updated regression coverage:
+  - `stock_replay/backend/tests/test_event_builder.py`
+- Updated main product doc:
+  - `atas开发/project.md`
+- Verified behavior on the real sample `002281.SZ` / `20260325`:
+  - `missing_order_count` dropped to `267`
+  - raw validation remained stable at `mismatch_count = 35287`
+- Ran backend tests from `stock_replay/backend`; result: `18 passed`.
+
+## 2026-05-01 SH/SZ Sample Order-Book Error Repair
+- Diagnosed all 17 SH/SZ sample sessions after the A-share rule alignment.
+- Found a Shanghai-specific same-timestamp lifecycle pattern:
+  - some `.SH` order rows contain the same `exchange_order_id` with both `A` and `D` in the same millisecond.
+  - if source sequence is `D` then `A`, the previous engine logged a missing cancel and left a stale crossed order in the raw book.
+- Updated `EventBuilder` event sorting so same-millisecond order lifecycle events are grouped by `exchange_order_id`, with `order_add` before `order_cancel`.
+- Added regression coverage for same-timestamp `D/A` pairs.
+- Found a second Shanghai-specific execution pattern:
+  - Wind documents Shanghai order quantity as remaining order quantity.
+  - for `.SH` active-side orders added in the same millisecond as the trade, deducting the active order again double-counts the same execution.
+- Updated `OrderBookEngine` to skip only `.SH` same-millisecond active-side trade reduction; Shenzhen remains on the previous two-side reduction path.
+- Added regression coverage proving:
+  - `.SH` same-millisecond active-side residual is preserved.
+  - `.SZ` same-millisecond active-side order is still reduced as before.
+- Ran backend tests from `stock_replay/backend`; result: `21 passed`.
+- Re-imported all 17 sample sessions.
+- Current full-sample validation summary:
+  - `checked_quotes = 76908`
+  - `mismatch_count = 446140`
+  - `price_mismatch_count = 375342`
+  - `qty_mismatch_count = 417309`
+  - `missing_order_count = 938`
+- Improvement versus the previous full-sample run:
+  - mismatch dropped from `492866` to `446140`.
+  - missing order dropped from `42129` to `938`.
+  - Shanghai missing order is now `0` across the sample set.
+- Remaining verified residual concentration:
+  - opening auction `09:15-09:30`: `31647` mismatches.
+  - first continuous minute `09:30-09:31`: `3263` mismatches.
+  - close auction window `14:57-15:00`: `11523` mismatches.
+- Next residual targets:
+  - distinguish auction indicative/display book from raw unexecuted order book.
+  - investigate the remaining Shenzhen `missing_order_count = 938`.
+
+## 2026-05-01 Intraday Accuracy Scope Reset
+- Updated the active development focus to core intraday continuous-auction precision.
+- New headline target windows:
+  - `09:31-11:30`
+  - `13:00-14:57`
+- Opening auction `09:15-09:30` and close auction `14:57-15:00` are no longer RawBook reconstruction targets for this phase.
+- Auction display requirements are limited to:
+  - high-open / low-open / flat-open status.
+  - auction total traded quantity.
+  - first valid trade or first valid order marker.
+- Recomputed current core intraday residual across the 17-session sample set:
+  - `mismatch_count = 399635`
+  - `price_mismatch_count = 329622`
+  - `qty_mismatch_count = 371033`
+- Core intraday residual by exchange/window:
+  - SZ `09:31-11:30`: `149689`
+  - SZ `13:00-14:57`: `122613`
+  - SH `09:31-11:30`: `67640`
+  - SH `13:00-14:57`: `59693`
+- Current remaining missing-order scope:
+  - all remaining `938` missing orders are Shenzhen-side.
+  - dominant reason is continuous-auction `missing_trade_order`.
+- Updated planning docs to prevent scope drift:
+  - `task_plan.md`
+  - `findings.md`
+  - `atas开发/project.md`
+- Next implementation target:
+  - Shenzhen continuous-auction missing trade/order sequencing in `300502.SZ`, `002281.SZ`, `300308.SZ`, and `002384.SZ`.
+
+## 2026-05-01 Replay Time Semantics Fix
+- Fixed `ReplayEngine` so `current_ts_ms` now stays on the actual replay clock time, while `checkpoint_ts_ms` keeps the nearest loaded visible checkpoint time.
+- This prevents replay frames from collapsing the displayed time axis back onto the checkpoint timestamp.
+- Updated `stock_replay/backend/tests/test_replay_engine.py` to assert the corrected time semantics.
+- Ran `E:\atas回放系统\stock_replay\.venv\Scripts\python.exe -m pytest` in `stock_replay/backend`; result: `21 passed`.
+
+## 2026-05-01 Dependency Installation
+- Installed backend runtime and dev dependencies into `E:\atas回放系统\stock_replay\.venv` using:
+  - `requirements.txt`
+  - `requirements-dev.txt`
+- Installed frontend dependencies with `npm ci` under `stock_replay/frontend`.
+- Verified the environment is runnable on this machine:
+  - backend tests: `21 passed`
+  - frontend build: `npm run build` succeeded
+
+## 2026-05-01 Quote Cumulative Trade Anchor
+- Continued the interrupted core-intraday residual repair after `missing_order_count` had been reduced to `0`.
+- Verified the main residual was not missing orders, but quote snapshot ordering against the order/trade event stream.
+- Updated `stock_replay/backend/stock_replay_backend/event_builder.py` so quote events keep their original `ts_ms` but sort after the non-cancel trade whose cumulative quantity matches `quotes.cum_qty` when that trade occurs later than the quote timestamp.
+- Preserved the conservative guard that a quote is never sorted earlier than its original quote timestamp.
+- Added regression coverage in `stock_replay/backend/tests/test_event_builder.py` for:
+  - late cumulative-trade quote anchoring.
+  - earlier trade anchors that must not pull a quote forward in time.
+- Re-imported all 17 sample sessions from `实例材料/个股数据`.
+- Verified full-day 17-session metrics after the fix:
+  - `checked_quotes = 76908`
+  - `mismatch_count = 194341`
+  - `price_mismatch_count = 155217`
+  - `qty_mismatch_count = 184369`
+  - `missing_order_count = 0`
+- Verified core intraday metrics after the fix:
+  - `mismatch_count = 150553`
+  - `price_mismatch_count = 111938`
+  - `qty_mismatch_count = 140653`
+  - `09:31-11:30 mismatch_count = 78748`
+  - `13:00-14:57 mismatch_count = 71805`
+- Tested a global "quote sorts at second-end" rule and rejected it:
+  - it improved some high-residual samples such as `300308.SZ` and `300408.SZ`.
+  - it worsened others such as `002384.SZ` and `688521.SH`.
+  - no sample-specific timing branch was adopted.
+- Ran backend tests from `stock_replay/backend`; result: `24 passed`.
+
+## 2026-05-01 Same-Millisecond Quote Placement
+- Continued residual reduction from the verified `194341 / 155217 / 184369` full-day baseline and `150553 / 111938 / 140653` core-intraday baseline.
+- Tested quote timing alternatives across all 17 processed sessions:
+  - global same-second quote placement was rejected because it sharply worsened the aggregate result.
+  - same-millisecond quote placement improved every Shenzhen core sample and did not change Shanghai core samples.
+- Updated `EventBuilder` so cumulative-trade anchors can still move quote events later, but quote validation now runs after all order/trade events in the selected millisecond.
+- Added regression coverage for a late cumulative anchor followed by another trade in the same millisecond.
+- Extended residual diagnostics JSON with:
+  - `core_intraday`
+  - `symbol_summaries`
+- Re-imported all 17 sample sessions.
+- Verified full-day 17-session metrics:
+  - `checked_quotes = 76908`
+  - `mismatch_count = 193706`
+  - `price_mismatch_count = 154912`
+  - `qty_mismatch_count = 183767`
+  - `missing_order_count = 0`
+- Verified core intraday metrics:
+  - `mismatch_count = 149923`
+  - `price_mismatch_count = 111633`
+  - `qty_mismatch_count = 140056`
+  - `09:31-11:30 mismatch_count = 78378`
+  - `13:00-14:57 mismatch_count = 71545`
+- Ran backend tests from `stock_replay/backend`; result: `25 passed`.
+
+## 2026-05-01 No-Trade Quote Phase Alignment
+- Continued remaining residual research from:
+  - full-day `193706 / 154912 / 183767`
+  - core intraday `149923 / 111633 / 140056`
+- Identified a major one-level shift signature:
+  - `75812 / 111633` core price mismatches had `actual_price_int == quote_price_at_level+1`.
+  - this pointed to visible best levels being absent from RawBook at validation time.
+- Verified active-side trade depletion was not the main cause:
+  - skipping active-side depletion worsened core residual to `1454249`.
+- Found that no-trade quotes dominate the remaining mismatch:
+  - `last_qty = 0` quote snapshots accounted for `145587 / 149923` core mismatch rows before this step.
+- Tested quote delay grids:
+  - global same-second and global fixed no-trade delays were rejected because they worsened some sessions.
+  - a session-level median anchor-delay rule improved all 17-session totals.
+- Updated `EventBuilder`:
+  - computes the median cumulative-trade anchor delay for core-intraday no-trade quotes.
+  - applies `+500ms` no-trade quote phase delay when the median is `200-299ms`.
+  - applies `+1000ms` no-trade quote phase delay when the median is `>=300ms`.
+  - keeps original quote `ts_ms` and quote anchor fields unchanged for reporting/replay semantics.
+- Added regression coverage for the session no-trade quote delay.
+- Re-imported all 17 sample sessions.
+- Verified full-day metrics:
+  - `checked_quotes = 76908`
+  - `mismatch_count = 147241`
+  - `price_mismatch_count = 116002`
+  - `qty_mismatch_count = 141613`
+  - `missing_order_count = 0`
+- Verified core intraday metrics:
+  - `mismatch_count = 103284`
+  - `price_mismatch_count = 72556`
+  - `qty_mismatch_count = 97732`
+  - `09:31-11:30 mismatch_count = 56033`
+  - `13:00-14:57 mismatch_count = 47251`
+- Regenerated residual diagnostics JSON.
+- Ran backend tests from `stock_replay/backend`; result: `26 passed`.
+- Errors encountered:
+  - broad offset grid timed out twice due row-wise replay cost; switched to single-symbol and rule-focused validation.
+  - initial Polars implementation referenced a newly-created column inside the same `with_columns`; fixed by splitting into two `with_columns` calls.
+
+## 2026-05-02 Level1 3-Second Bucket Phase Inference
+- User clarified that A-share Level1 data is presented as 3-second aggregates, and the tick-by-tick trade file is a precise decomposition of those aggregates.
+- Reinterpreted the previous no-trade delay factor as a 3-second quote-bucket phase problem rather than a vendor-specific empirical delay.
+- Verified on `300502.SZ` that quote cumulative deltas can exactly match a shifted 3-second trade window:
+  - example quote `97` matched non-cancel trades in `[quote_ts - 2000ms, quote_ts + 1000ms)` by both quantity and trade count.
+- Tested candidate 3-second windows across all 17 sessions.
+- Inferred per-session bucket end offsets by maximizing exact `(cum_qty_delta, trade_count_delta)` matches:
+  - offsets ranged from `0ms` to `1500ms`.
+  - the most common offsets were `250ms`, `500ms`, `750ms`, `1000ms`, and `1250ms`.
+- Replaced the previous no-trade median-delay rule in `EventBuilder` with deterministic 3-second bucket phase inference:
+  - candidate start offsets are tested from `-3000ms` through `+1000ms` in `250ms` steps.
+  - quote sort time is at least `ts_ms + inferred_bucket_end_offset`.
+  - original quote `ts_ms` remains unchanged for reporting and replay clock semantics.
+- Updated event-builder regression coverage to assert inferred 3-second bucket phase behavior.
+- Re-imported all 17 sample sessions.
+- Verified full-day metrics:
+  - `checked_quotes = 76908`
+  - `mismatch_count = 112333`
+  - `price_mismatch_count = 94181`
+  - `qty_mismatch_count = 108242`
+  - `missing_order_count = 0`
+- Verified core intraday metrics:
+  - `mismatch_count = 67470`
+  - `price_mismatch_count = 49946`
+  - `qty_mismatch_count = 63485`
+  - `09:31-11:30 mismatch_count = 38839`
+  - `13:00-14:57 mismatch_count = 28631`
+- Recorded residual percentage/distribution:
+  - full-day denominator: `1538160` level checks; mismatch rate `7.30%`.
+  - full-day split: both price+qty `90090` (`80.20%`), price-only `4091` (`3.64%`), qty-only `18152` (`16.16%`).
+  - core denominator: `1486280` level checks; mismatch rate `4.54%`.
+  - core split: both price+qty `45961` (`68.12%`), price-only `3985` (`5.91%`), qty-only `17524` (`25.97%`).
+  - core window rates: `09:31-11:30 = 5.14%`, `13:00-14:57 = 3.92%`.
+- Regenerated residual diagnostics JSON.
+- Ran backend tests from `stock_replay/backend`; result: `26 passed`.
+
+## 2026-05-02 Pure Wind-Rule DOM Replay
+- User requested a replay path based only on supplied rules and Wind field definitions, without residual-fitted timing algorithms.
+- Read `C:\Users\21274\Desktop\规则.md`.
+- Extracted Wind definitions from `实例材料/wind-level2字段说明书.pdf`.
+- Updated `EventBuilder` to remove:
+  - cumulative quote trade anchors.
+  - inferred 3-second bucket end offsets.
+  - quote sort-time movement beyond the original Wind timestamp.
+- Kept only field-definition rules:
+  - SH `A/D` order add/cancel.
+  - SZ `0/1/U` as limit/market/best-side behavior.
+  - SZ trade code `C` as cancel execution report.
+  - quote validation after same-timestamp order/trade events.
+- Reworked event-builder tests around field semantics instead of inferred quote phase behavior.
+- Ran event-builder tests: `5 passed`.
+- Ran full backend tests from `stock_replay/backend`: `23 passed`.
+- Re-imported all 17 sample sessions.
+- Regenerated residual diagnostics.
+- Verified pure-rule full-day metrics:
+  - `checked_quotes = 76908`
+  - `mismatch_count = 446140`
+  - `price_mismatch_count = 375342`
+  - `qty_mismatch_count = 417309`
+  - `missing_order_count = 0`
+- Verified pure-rule core intraday metrics:
+  - `mismatch_count = 399635`
+  - `price_mismatch_count = 329622`
+  - `qty_mismatch_count = 371033`
+  - `09:31-11:30 mismatch_count = 217329`
+  - `13:00-14:57 mismatch_count = 182306`
+- Interpretation:
+  - this proves the rule-only path does not produce perfect Wind quote DOM reproduction on the current samples.
+  - it also confirms the remaining issue is not missing order references.
+
+## 2026-05-02 Drift Elimination Back To Bucket Baseline
+- User requested drift elimination after the pure-rule experiment.
+- Restored `EventBuilder` to the current working baseline:
+  - Wind field semantics for SH/SZ order/trade event types.
+  - cumulative quote trade anchors.
+  - 3-second quote-bucket phase inference from quote `cum_qty/trade_count` deltas.
+- Restored event-builder regression coverage for inferred 3-second bucket phase.
+- Ran event-builder tests: `6 passed`.
+- Ran full backend tests from `stock_replay/backend`: `24 passed`.
+- Re-imported all 17 sample sessions.
+- Regenerated residual diagnostics.
+- Verified restored full-day metrics:
+  - `checked_quotes = 76908`
+  - `mismatch_count = 112333`
+  - `price_mismatch_count = 94181`
+  - `qty_mismatch_count = 108242`
+  - `missing_order_count = 0`
+- Verified restored core intraday metrics:
+  - `mismatch_count = 67470`
+  - `price_mismatch_count = 49946`
+  - `qty_mismatch_count = 63485`
+  - `09:31-11:30 mismatch_count = 38839`
+  - `13:00-14:57 mismatch_count = 28631`
+
+## 2026-05-02 Haitong LOB Composition Reconstruction
+- Read Haitong LOB reconstruction section from the supplied PDF, pages 5-7.
+- Key actionable rule identified: complete LOB reconstruction is not only top-ten aggregated levels; it should preserve every resting order's remaining quantity and order time within each price level.
+- Initial code inspection found current `OrderBookEngine` reconstructs full-depth aggregated levels and keeps per-order state, but lacks per-price queue/composition snapshots.
+- Installed/verified dependencies:
+  - backend `.venv`: `requirements.txt`, `requirements-dev.txt`, `pdfplumber`, `pypdf`.
+  - frontend: `npm install`, no vulnerabilities reported.
+- Updated `normalizer.py`:
+  - orders now carry `message_seq` from `交易所委托号`.
+  - trades now carry `message_seq` from `成交编号`.
+- Updated `event_builder.py`:
+  - order/trade tick events now sort by `message_seq` within the same effective timestamp instead of using a fixed all-orders-before-all-trades rule.
+  - quote events still validate after same-timestamp tick events.
+- Updated `orderbook_engine.py`:
+  - `OrderState` now retains original quantity, source sequence, and add event id.
+  - added `OrderQueueEntry`, `BookQueueLevel`, and `snapshot_order_queues(depth=None)`.
+  - queue snapshots expose full-depth price levels and per-price order composition.
+- Added tests:
+  - unified message-sequence order/trade sorting.
+  - per-price queue composition with partial trade/cancel depletion.
+  - market/non-resting orders omitted from queue composition.
+- Verification:
+  - `python -m pytest` from backend using `.venv`: `27 passed`.
+  - re-imported all 17 sample sessions from `实例材料/个股数据`.
+  - regenerated residual diagnostics.
+  - full-day metrics: `mismatch_count = 112333`, `price_mismatch_count = 94181`, `qty_mismatch_count = 108242`, `missing_order_count = 0`.
+  - core intraday metrics: `mismatch_count = 67470`, `price_mismatch_count = 49946`, `qty_mismatch_count = 63485`.
+  - extracted a real `600726.SH` queue snapshot at `09:31`; top ask/bid levels include per-order id, remaining qty, add time, and source seq.
+
+## 2026-05-02 Auction Carryover Check
+- Re-read the full PDF LOB reconstruction section and mapped it against current code.
+- Verified current conflict with PDF:
+  - auction and continuous sessions are labeled but not processed with separate auction-specific logic.
+  - auction quote snapshots are still validated as raw top10, although the PDF says auction snapshots are virtual/indicative and not the real multi-price queue.
+- Ran a diagnostic reset experiment:
+  - seeded the engine from the first `09:31+` quote top10 and replayed later tick events.
+  - result worsened core residual from about `67k` to about `843k`.
+  - interpretation: pre-open/auction accumulated depth is necessary; top10 quote anchoring is not a valid replacement for real LOB state.
+- Ran carryover concentration checks:
+  - first opening quote mismatch vs full core residual correlation across samples: about `0.29`.
+  - `09:31-09:40` mismatches: `6759` out of `67470` core mismatches.
+  - examples with opening mismatch `0` but later core residual: `300308.SZ = 4012`, `603986.SH = 5465`, `688521.SH = 3291`.
+- Working conclusion:
+  - incomplete auction handling is a real conflict with the PDF and should be corrected.
+  - it is not sufficient as the main explanation for all current盤中 residual.
+
+## 2026-05-02 PDF-First LOB Correction
+- User instructed: use the PDF as authority and correct the code.
+- Updated `EventBuilder`:
+  - removed cumulative quote anchors from event sorting.
+  - removed inferred 3-second bucket phase from event sorting.
+  - quote events now stay on their reported `ts_ms` and run after same-timestamp tick events only.
+- Updated `OrderBookValidator`:
+  - auction-session quote snapshots are skipped for raw top10 validation because PDF says auction snapshots are virtual/indicative and not the true multi-price queue.
+- Updated tests:
+  - removed expected quote bucket fields.
+  - added quote-stays-on-reported-timestamp behavior.
+  - added auction quote validation skip behavior.
+  - importer checked quote count now expects non-auction quotes.
+- Ran backend tests: `28 passed`.
+- Re-imported all 17 sample sessions.
+- Regenerated residual diagnostics.
+- Verified PDF-first metrics:
+  - full-day: `mismatch_count = 414593`, `price_mismatch_count = 344026`, `qty_mismatch_count = 385801`, `missing_order_count = 0`.
+  - core intraday: `mismatch_count = 399635`, `price_mismatch_count = 329622`, `qty_mismatch_count = 371033`.
+  - core windows: `09:31-11:30 = 217329`, `13:00-14:57 = 182306`.
+- Interpretation:
+  - residual increased because the previous 3-second bucket baseline was a quote-snapshot fitting layer.
+  - current RawBook now follows the PDF construction rule more strictly.
+
+## 2026-05-02 PDF-Grounded 3-Second Quote Merge
+- User pointed to the PDF passage that continuous quote snapshots are generated every 3 seconds and that each stock has an almost stable delay relative to the 3-second grid, likely by security-code order.
+- Reintroduced 3-second quote merge under the current PDF rules:
+  - infer a stable quote bucket end offset from quote cumulative volume/trade-count deltas against non-cancel tick trades.
+  - align quote validation after its cumulative trade anchor when the quote cumulative volume identifies one.
+  - keep RawBook state generated from tick orders/trades; quote top10 does not overwrite the reconstructed order book.
+  - keep auction-session quote snapshots skipped in raw top10 validation because the PDF describes them as virtual/indicative rather than real multi-price depth.
+- Updated regression tests for quote bucket offset and cumulative trade anchor fields.
+- Verification:
+  - backend tests: `28 passed`.
+  - re-imported all 17 sample sessions.
+  - regenerated residual diagnostics.
+  - full-day residual: `mismatch_count = 80718`, `price_mismatch_count = 62690`, `qty_mismatch_count = 76670`, `missing_order_count = 0`.
+  - core intraday residual: `mismatch_count = 67470`, `price_mismatch_count = 49946`, `qty_mismatch_count = 63485`.
+  - core windows: `09:31-11:30 = 38839`, `13:00-14:57 = 28631`.
+- Interpretation:
+  - the 3-second merge recovers the prior best core-intraday quote alignment while preserving the PDF corrections for auction quote validation and tick-driven full-depth state.
+  - the lower full-day mismatch versus the old 3-second baseline is explained by excluding PDF-virtual auction snapshots from RawBook validation.

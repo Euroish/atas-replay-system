@@ -383,8 +383,9 @@ HHMMSSmmm -> hour * 3600000 + minute * 60000 + second * 1000 + millisecond
 入簿规则：
 
 - `A`、`0`：进入订单簿。
-- `D`、`1`：按 `exchange_order_id` 从订单簿扣减或移除。
-- `S`、`U`、其他无法识别类型：作为非入簿事件进入 event stream，不进入订单簿。
+- `D`：按 `exchange_order_id` 从订单簿扣减或移除。
+- `1`、`U`：作为非入簿市场单/本方最优申报进入 event stream，不直接写入 resting book。
+- `S`、其他无法识别类型：作为非入簿事件进入 event stream，不进入订单簿。
 - 无法识别字段写入 `import_warning`，不中断全量导入。
 
 ### 7.4 trades.parquet
@@ -413,7 +414,7 @@ HHMMSSmmm -> hour * 3600000 + minute * 60000 + second * 1000 + millisecond
 | 字段 | 说明 |
 | --- | --- |
 | `event_id` | 全局事件编号 |
-| `event_type` | `quote`、`order_add`、`order_cancel`、`trade`、`session` |
+| `event_type` | `quote`、`order_add`、`order_cancel`、`market_order`、`trade`、`trade_cancel`、`session` |
 | `ts_ms` | 事件时间 |
 | `priority` | 同毫秒排序优先级 |
 | `source_seq` | 源文件行号或源内序号 |
@@ -422,8 +423,14 @@ HHMMSSmmm -> hour * 3600000 + minute * 60000 + second * 1000 + millisecond
 同毫秒排序建议：
 
 ```text
-session -> order_add/order_cancel -> trade -> quote
+session -> order_add/order_cancel/market_order -> trade/trade_cancel -> quote
 ```
+
+同一毫秒、同一 `exchange_order_id` 的订单生命周期事件需要额外稳定排序：
+
+- `order_add` 先于 `order_cancel`。
+- 该规则用于修复上海样本中同毫秒 `D/A` 源顺序导致的 stale crossed order。
+- 不改变不同订单号之间的最终聚合量语义。
 
 原因：
 
@@ -473,12 +480,21 @@ order_type = A / 0
 撤单：
 
 ```text
-order_type = D / 1
+order_type = D
 1. 按 exchange_order_id 查订单。
 2. 找不到订单：记录 missing_cancel_order，不伪造订单。
 3. 找到订单：扣减 remaining_qty，通常按撤单 qty 或剩余量取较小值。
 4. 对应 price level 扣减，最小为 0。
 5. 生成 liquidity cancel delta。
+```
+
+非入簿市场单：
+
+```text
+order_type = 1 / U
+1. 作为市场单或本方最优申报保留在事件流中。
+2. 不直接写入 resting book。
+3. 其影响通过后续 trade / trade_cancel / quote residual 诊断体现。
 ```
 
 成交：
@@ -487,10 +503,20 @@ order_type = D / 1
 event_type = trade
 1. `aggressor_side = B` 时，ask_order_id 为被动侧卖单，必须扣减；bid_order_id 如果当前账本中存在则扣减，不存在不计为 missing order。
 2. `aggressor_side = S` 时，bid_order_id 为被动侧买单，必须扣减；ask_order_id 如果当前账本中存在则扣减，不存在不计为 missing order。
-3. 被动侧找不到订单：记录 missing_trade_order。
-4. 扣减后 remaining_qty 不得小于 0。
-5. level total_qty 不得小于 0。
-6. 根据 aggressor_side 生成主动买/主动卖成交统计。
+3. 上海 `.SH` 中，如果主动侧订单是在同一毫秒刚进入订单簿，且 Wind 委托数量已经表示剩余量，则不再对主动侧做二次扣减。
+4. 深圳 `.SZ` 保持主动侧存在即扣减的当前规则；全样本测试显示把上海同毫秒规则套到深圳会显著恶化复现。
+5. 被动侧找不到订单：记录 missing_trade_order。
+6. 扣减后 remaining_qty 不得小于 0。
+7. level total_qty 不得小于 0。
+8. 根据 aggressor_side 生成主动买/主动卖成交统计。
+```
+
+撤销执行报告：
+
+```text
+event_type = trade_cancel
+1. 按成交记录中的被撤销委托号扣减订单簿，语义上等价于撤单流。
+2. 保留在成交流优先级中，避免同毫秒内提前跨越原始成交源序列。
 ```
 
 ### 8.3 快照校验
@@ -575,7 +601,10 @@ VisibleBook:
 开发判断：
 
 - 盘中 `raw_match_rate` 不作为 95%+ 验收目标。
-- 盘中 95%+ 目标只适用于 VisibleBook 的 quote 锚定与 checkpoint 输出。
+- 当前精度工作只看核心连续竞价窗口：`09:31-11:30`、`13:00-14:57`。
+- 开盘集合竞价和收盘集合竞价不作为当前 RawBook 误差修复目标。
+- 集合竞价只要求正常显示高开/低开/平开、集合竞价总成交量、第一笔有效成交或委托标记。
+- 盘中 95%+ 目标只适用于核心连续竞价 VisibleBook 的 quote 锚定与 checkpoint 输出。
 - Footprint、Delta、Volume Profile 的成交量基础来自 `trades.parquet`，RawBook 只提供盘口背景和订单状态辅助。
 - 局部排序搜索、平滑修正窗口、复杂 correction 只能作为后续实验，不作为 P4.0 主线。
 
@@ -1323,7 +1352,8 @@ validation_runs:
 - 用 `行情.csv` 的买卖 10 档校验引擎 top10。
 - 输出 validation report 和 missing order report。
 - 拆分并固定 `raw_match_rate`、`quote_anchor_match_rate`、`inter_quote_drift`、`correction_cost` 等指标口径。
-- 对盘中 `09:31-11:30`、`13:00-14:57` 单独统计 raw 残差，证明后续优化目标是否应进入 VisibleBook。
+- 对核心盘中 `09:31-11:30`、`13:00-14:57` 单独统计 raw 残差，作为当前订单簿修复主指标。
+- 开盘集合竞价和收盘集合竞价只保留展示所需统计，不进入当前 RawBook 精度 KPI。
 
 验收：
 
@@ -1333,6 +1363,9 @@ validation_runs:
 - UI 或 CLI 能展示校验摘要。
 - 不把 raw book 强行调到 95% 作为 P3 验收。
 - P3 结束时必须明确哪些问题属于 raw 数据残差，哪些问题进入 P4 的 visible replay/checkpoint。
+- 当前已完成 3 秒合单桶基线：quote 保留原始 `ts_ms`，排序时结合累计成交锚点和 3 秒合单窗口相位。
+- 当前盘中核心残差：`mismatch_count = 67470`、`price_mismatch_count = 49946`、`qty_mismatch_count = 63485`。
+- 当前 `missing_order_count = 0`；纯时间戳逐笔重建实验已证明不能完全复现 Wind 3 秒十档快照，剩余残差按 RawBook vs quote top10 timing/display residual 继续诊断，不用无证据规则覆盖。
 
 ### Phase 4：回放服务
 
@@ -1351,7 +1384,8 @@ validation_runs:
 验收：
 
 - RawBook 不被 quote 覆盖，不伪造 order_id。
-- 盘中 `09:31-11:30`、`13:00-14:57` 的 VisibleBook quote anchor/checkpoint 匹配率达到 95%+。
+- 核心盘中 `09:31-11:30`、`13:00-14:57` 的 VisibleBook quote anchor/checkpoint 匹配率达到 95%+。
+- 开盘/收盘集合竞价无需 RawBook 精准重建，但必须能显示高开/低开/平开、集合竞价总成交量和第一笔有效成交或委托。
 - 每个 checkpoint 可追溯来源：quote_anchor、event_delta、correction 或 raw diagnostic。
 - 记录 `inter_quote_drift` 与 `correction_cost`，不把 quote 点 100% 对齐伪装成完整真实盘口。
 - 同一 ts 重复 seek 输出一致。
@@ -1473,8 +1507,9 @@ validation_runs:
 
 | 风险 | 影响 | 处理 |
 | --- | --- | --- |
-| 逐笔委托/成交与行情快照无法完全对齐 | 订单簿误差 | 输出 validation report，使用快照作为锚点，不隐藏误差 |
-| 部分成交找不到对应订单号 | 成交扣减不完整 | 记录 missing_trade_order，不伪造订单；指标仍可基于成交流计算 |
+| 逐笔委托/成交与行情快照无法完全对齐 | 盘中订单簿误差 | 核心连续竞价单独统计，使用快照作为 VisibleBook 锚点，不隐藏 RawBook 残差 |
+| 开盘/收盘集合竞价盘口语义不同 | 全天误差被误读 | 不作为当前 RawBook 精度 KPI，只做开平状态、集合竞价总量和首笔标记展示 |
+| 深圳剩余成交找不到对应订单号 | 盘中成交扣减不完整 | 优先排查深圳连续竞价 missing_trade_order，不伪造订单；指标仍可基于成交流计算 |
 | 数据编码和空字符异常 | 导入失败或字段污染 | 编码探测、空字符清洗、保留 raw warning |
 | 多日连续回放数据量大 | 内存和 seek 压力 | Parquet 分区、checkpoint、视口查询 |
 | Heatmap 视觉数据过密 | 浏览器卡顿 | tile 裁剪、分位归一化、worker 合批、Canvas/WebGL |

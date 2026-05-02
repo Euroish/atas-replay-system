@@ -17,7 +17,7 @@ def test_validator_generates_mismatch_report_and_summary() -> None:
     assert {"quote_seq", "ts_ms", "side", "level", "expected_price_int", "actual_price_int"}.issubset(
         result.report.columns
     )
-    assert result.summary.checked_quotes == quotes.height
+    assert result.summary.checked_quotes == quotes.filter(pl.col("session") != "auction").height
     assert result.summary.mismatch_count == result.report.height
     assert result.summary.price_mismatch_count >= 0
     assert result.summary.qty_mismatch_count >= 0
@@ -43,7 +43,7 @@ def test_validator_treats_zero_quote_level_and_missing_book_level_as_empty() -> 
         "low_int": 0,
         "open_int": 0,
         "prev_close_int": 0,
-        "price_scale": 1000,
+        "price_scale": 10_000,
     }
     for side in ("ask", "bid"):
         for level in range(1, 11):
@@ -72,3 +72,44 @@ def test_validator_treats_zero_quote_level_and_missing_book_level_as_empty() -> 
 
     assert result.report.is_empty()
     assert result.summary.mismatch_count == 0
+
+
+def test_validator_skips_auction_virtual_quote_snapshots() -> None:
+    quote_row = {
+        "symbol": "sample",
+        "exchange_code": "sample",
+        "trade_date": 20260101,
+        "time_raw": 91800000,
+        "ts_ms": 33480000,
+        "session": "auction",
+        "seq": 1,
+        "last_price_int": 0,
+        "last_qty": 0,
+    }
+    for side in ("ask", "bid"):
+        for level in range(1, 11):
+            quote_row[f"{side}_price_{level}_int"] = 10000 if level == 1 else 0
+            quote_row[f"{side}_qty_{level}"] = 100 if level == 1 else 0
+
+    quotes = pl.DataFrame([quote_row])
+    events = pl.DataFrame(
+        [
+            {
+                "event_id": 1,
+                "symbol": "sample",
+                "exchange_code": "sample",
+                "trade_date": 20260101,
+                "session": "auction",
+                "ts_ms": 33480000,
+                "event_type": "quote",
+                "priority": 3,
+                "source_seq": 1,
+                "payload_ref": "quotes:1",
+            }
+        ]
+    )
+
+    result = OrderBookValidator().validate(events, quotes)
+
+    assert result.summary.checked_quotes == 0
+    assert result.report.is_empty()
