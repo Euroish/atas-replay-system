@@ -89,6 +89,7 @@ class EventBuilder:
                 pl.format("orders:{}", pl.col("seq")).alias("payload_ref"),
                 "exchange_order_id",
                 "message_seq",
+                _optional_column(order_events, "biz_index", pl.Int64),
                 "order_no",
                 "order_type",
                 "side",
@@ -100,7 +101,8 @@ class EventBuilder:
         trade_events = trades.with_columns(
             _trade_event_type_expr().alias("event_type"),
             _trade_cancel_order_id_expr().alias("exchange_order_id"),
-        ).with_columns(pl.col("event_type").replace_strict(EVENT_PRIORITY).alias("priority")).select(
+        ).with_columns(pl.col("event_type").replace_strict(EVENT_PRIORITY).alias("priority"))
+        trade_events = trade_events.select(
             [
                 "symbol",
                 "exchange_code",
@@ -113,6 +115,7 @@ class EventBuilder:
                 pl.format("trades:{}", pl.col("seq")).alias("payload_ref"),
                 "trade_id",
                 "message_seq",
+                _optional_column(trade_events, "biz_index", pl.Int64),
                 "trade_code",
                 "aggressor_side",
                 "price_int",
@@ -145,7 +148,13 @@ class EventBuilder:
                     .otherwise(pl.lit(3))
                     .alias("_sort_group"),
                     pl.when(pl.col("event_type").is_in(["order_add", "order_cancel", "market_order", "trade", "trade_cancel"]))
-                    .then(pl.col("message_seq").fill_null(0))
+                    .then(
+                        pl.when(_is_shanghai_expr() & pl.col("biz_index").is_not_null())
+                        .then(pl.col("biz_index").fill_null(0))
+                        .when(_is_shenzhen_expr())
+                        .then(pl.col("message_seq").fill_null(0))
+                        .otherwise(pl.lit(0))
+                    )
                     .otherwise(pl.lit(0))
                     .alias("_message_sort"),
                     pl.when(pl.col("priority") == EVENT_PRIORITY["order_add"])
@@ -194,6 +203,24 @@ def _with_message_seq(frame: pl.DataFrame, source_column: str) -> pl.DataFrame:
     if source_column not in frame.columns:
         return frame.with_columns(pl.lit(None, dtype=pl.Int64).alias("message_seq"))
     return frame.with_columns(pl.col(source_column).cast(pl.Int64, strict=False).alias("message_seq"))
+
+
+def _optional_column(frame: pl.DataFrame, column: str, dtype: pl.DataType) -> pl.Expr:
+    if column in frame.columns:
+        return pl.col(column)
+    return pl.lit(None, dtype=dtype).alias(column)
+
+
+def _is_shanghai_expr() -> pl.Expr:
+    symbol = pl.col("symbol").fill_null("").str.to_uppercase()
+    exchange_code = pl.col("exchange_code").fill_null("")
+    return symbol.str.ends_with(".SH") | exchange_code.str.starts_with("6") | exchange_code.str.starts_with("9")
+
+
+def _is_shenzhen_expr() -> pl.Expr:
+    symbol = pl.col("symbol").fill_null("").str.to_uppercase()
+    exchange_code = pl.col("exchange_code").fill_null("")
+    return symbol.str.ends_with(".SZ") | exchange_code.str.starts_with("0") | exchange_code.str.starts_with("3")
 
 
 def _trade_event_type_expr() -> pl.Expr:

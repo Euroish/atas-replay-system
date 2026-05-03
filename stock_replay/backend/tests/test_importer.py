@@ -19,7 +19,7 @@ def test_import_sample_session() -> None:
     assert summary.symbol == "600726.SH"
     assert summary.trade_date == 20260424
     assert summary.session_id == "600726.SH-20260424"
-    assert len(summary.artifacts) == 7
+    assert len(summary.artifacts) == 8
 
     processed_dir = Path(summary.processed_dir)
     quotes = pl.read_parquet(processed_dir / "quotes.parquet")
@@ -28,6 +28,7 @@ def test_import_sample_session() -> None:
     events = pl.read_parquet(processed_dir / "events.parquet")
     validation_report = pl.read_parquet(processed_dir / "validation_report.parquet")
     missing_order_report = pl.read_parquet(processed_dir / "missing_order_report.parquet")
+    aggregate_match_report = pl.read_parquet(processed_dir / "aggregate_match_report.parquet")
     visible_checkpoints = pl.read_parquet(processed_dir / "visible_orderbook_checkpoints.parquet")
 
     assert quotes.height == 5005
@@ -36,6 +37,7 @@ def test_import_sample_session() -> None:
     assert events.height == 519237
     assert validation_report.height >= 0
     assert missing_order_report.height >= 0
+    assert aggregate_match_report.height > 0
     assert visible_checkpoints.height == quotes.height * 20
 
     assert {"symbol", "trade_date", "time_raw", "ts_ms", "price_scale"}.issubset(quotes.columns)
@@ -45,6 +47,9 @@ def test_import_sample_session() -> None:
     assert {"quote_seq", "side", "level", "expected_price_int", "actual_price_int"}.issubset(validation_report.columns)
     assert {"reason", "event_id", "event_type", "ts_ms", "session", "source_seq"}.issubset(
         missing_order_report.columns
+    )
+    assert {"expected_qty", "actual_qty", "expected_count", "actual_count", "exact_match"}.issubset(
+        aggregate_match_report.columns
     )
     assert {
         "checkpoint_id",
@@ -56,10 +61,13 @@ def test_import_sample_session() -> None:
     }.issubset(visible_checkpoints.columns)
     assert summary.validation_summary is not None
     assert summary.visible_book_summary is not None
+    assert summary.aggregate_match_summary is not None
     assert summary.visible_book_summary.quote_anchor_match_rate == 1.0
+    assert 0.0 <= summary.aggregate_match_summary.exact_match_rate <= 1.0
     assert quotes["price_scale"][0] == 10_000
 
     report = json.loads((processed_dir / "import_report.json").read_text(encoding="utf-8"))
     assert report["warnings"]
     assert report["validation_summary"]["checked_quotes"] == quotes.filter(pl.col("session") != "auction").height
     assert report["visible_book_summary"]["quote_anchor_match_rate"] == 1.0
+    assert report["aggregate_match_summary"]["checked_buckets"] == aggregate_match_report.height

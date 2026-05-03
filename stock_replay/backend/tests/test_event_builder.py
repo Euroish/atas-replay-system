@@ -219,6 +219,96 @@ def test_event_builder_uses_unified_message_sequence_for_tick_ordering() -> None
     assert events.filter(pl.col("payload_ref") == "trades:1").item(0, "message_seq") == 100
 
 
+def test_event_builder_does_not_unify_shanghai_order_and_trade_sequences() -> None:
+    quotes = _quote_frame(symbol="600000.SH", exchange_code="600000", ts_ms=1000)
+    orders = pl.DataFrame(
+        [
+            _order_row(
+                symbol="600000.SH",
+                exchange_code="600000",
+                ts_ms=1000,
+                seq=1,
+                order_id="101",
+                order_type="0",
+                side="B",
+                price_int=9900,
+                qty=100,
+            )
+        ]
+    )
+    trades = pl.DataFrame(
+        [
+            _trade_row(
+                symbol="600000.SH",
+                exchange_code="600000",
+                ts_ms=1000,
+                seq=1,
+                trade_id="100",
+                trade_code="0",
+                aggressor_side="B",
+                price_int=10000,
+                qty=100,
+                ask_order_id="99",
+                bid_order_id="98",
+            )
+        ]
+    )
+
+    events = EventBuilder().build(quotes, orders, trades).events
+
+    assert events.get_column("payload_ref").to_list() == ["orders:1", "trades:1", "quotes:1"]
+    assert events.filter(pl.col("payload_ref") == "orders:1").item(0, "message_seq") == 101
+    assert events.filter(pl.col("payload_ref") == "trades:1").item(0, "message_seq") == 100
+
+
+def test_event_builder_uses_shanghai_biz_index_when_available() -> None:
+    quotes = _quote_frame(symbol="600000.SH", exchange_code="600000", ts_ms=1000)
+    orders = pl.DataFrame(
+        [
+            {
+                **_order_row(
+                    symbol="600000.SH",
+                    exchange_code="600000",
+                    ts_ms=1000,
+                    seq=1,
+                    order_id="101",
+                    order_type="A",
+                    side="B",
+                    price_int=9900,
+                    qty=100,
+                ),
+                "biz_index": 20,
+            }
+        ]
+    )
+    trades = pl.DataFrame(
+        [
+            {
+                **_trade_row(
+                    symbol="600000.SH",
+                    exchange_code="600000",
+                    ts_ms=1000,
+                    seq=1,
+                    trade_id="100",
+                    trade_code="",
+                    aggressor_side="B",
+                    price_int=10000,
+                    qty=100,
+                    ask_order_id="99",
+                    bid_order_id="98",
+                ),
+                "biz_index": 10,
+            }
+        ]
+    )
+
+    events = EventBuilder().build(quotes, orders, trades).events
+
+    assert events.get_column("payload_ref").to_list() == ["trades:1", "orders:1", "quotes:1"]
+    assert events.filter(pl.col("payload_ref") == "orders:1").item(0, "biz_index") == 20
+    assert events.filter(pl.col("payload_ref") == "trades:1").item(0, "biz_index") == 10
+
+
 def test_event_builder_applies_three_second_quote_merge_phase() -> None:
     quote_rows = []
     trade_rows = []

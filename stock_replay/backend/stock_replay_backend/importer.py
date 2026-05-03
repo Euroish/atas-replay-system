@@ -6,6 +6,7 @@ import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .aggregate_match import AggregateMatchSummary, ThreeSecondAggregateMatcher
 from .config import AppPaths
 from .event_builder import EventBuilder
 from .normalizer import load_csv_table, normalize_orders, normalize_quotes, normalize_trades
@@ -41,6 +42,7 @@ class ImportSummary:
     warnings: list[str]
     validation_summary: ValidationSummary | None = None
     visible_book_summary: VisibleBookSummary | None = None
+    aggregate_match_summary: AggregateMatchSummary | None = None
 
 
 class SessionImporter:
@@ -71,6 +73,10 @@ class SessionImporter:
         validation_result = OrderBookValidator().validate(
             event_result.events,
             normalized_frames["quotes"],
+        )
+        aggregate_match_result = ThreeSecondAggregateMatcher().match(
+            normalized_frames["quotes"],
+            normalized_frames["trades"],
         )
         visible_book_result = VisibleBookBuilder().build(
             event_result.events,
@@ -137,6 +143,18 @@ class SessionImporter:
                 null_bytes_removed=0,
             )
         )
+        aggregate_match_path = processed_dir / "aggregate_match_report.parquet"
+        aggregate_match_result.report.write_parquet(aggregate_match_path, compression="zstd")
+        artifacts.append(
+            ImportArtifact(
+                name="aggregate_match_report",
+                source_file="generated",
+                parquet_file=str(aggregate_match_path),
+                encoding="derived",
+                source_rows=aggregate_match_result.report.height,
+                null_bytes_removed=0,
+            )
+        )
         visible_checkpoint_path = processed_dir / "visible_orderbook_checkpoints.parquet"
         visible_book_result.checkpoints.write_parquet(visible_checkpoint_path, compression="zstd")
         artifacts.append(
@@ -160,6 +178,7 @@ class SessionImporter:
             warnings=warnings,
             validation_summary=validation_result.summary,
             visible_book_summary=visible_book_result.summary,
+            aggregate_match_summary=aggregate_match_result.summary,
         )
         report_path = processed_dir / "import_report.json"
         report_path.write_text(
